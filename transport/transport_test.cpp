@@ -4,12 +4,12 @@
 
 #include <iostream>
 #include "library.h"
-#include "utils/Logger.h"
+#include "utils/utils.h"
 #include <gtest/gtest.h>
 
 TEST(Transport, UnitTest)
 {
-  Logger a;
+  utils a;
   auto b = a.logger();
   std::cout << b->name() << std::endl;
   b->info("first log");

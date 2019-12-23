@@ -6,6 +6,9 @@
 #define YCRT_YCRT_NODEHOST_H_
 
 class NodeHost {
+ public:
+  NodeHost();
+ private:
 };
 
 #endif //YCRT_YCRT_NODEHOST_H_
