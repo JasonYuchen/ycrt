@@ -13,7 +13,7 @@ namespace ycrt
 namespace settings
 {
 
-struct soft {
+struct Soft {
   /// Raft
   // MaxEntrySize defines the max total entry size that can be included in
   // the Replicate message.
@@ -127,7 +127,7 @@ struct soft {
   uint64_t RocksDBLevelCompactionDynamicLevelBytes = 0;
   uint64_t RocksDBRecycleLogFileNum = 0;
 
-  static soft &ins();
+  static Soft &ins();
 };
 
 } // namespace settings

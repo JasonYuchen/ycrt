@@ -13,7 +13,7 @@ namespace ycrt
 namespace settings
 {
 
-struct hard {
+struct Hard {
   // StepEngineWorkerCount defines number of workers to use to process raft node
   // changes. Together with the LogDBPoolSize parameters below, they determine
   // the content of each logdb shards. You will have to build your own tools to
@@ -30,7 +30,7 @@ struct hard {
   // LogDBEntryBatchSize is the max size of each entry batch.
   uint64_t LogDBEntryBatchSize = 16;
 
-  static hard &ins();
+  static Hard &ins();
 };
 
 } // namespace settings

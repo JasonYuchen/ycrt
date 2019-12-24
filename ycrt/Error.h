@@ -8,11 +8,16 @@
 #include <string>
 #include <stdexcept>
 
+namespace ycrt
+{
+
 class Error : public std::runtime_error {
  public:
   Error(const std::string &what) : std::runtime_error(what) {}
  private:
 
 };
+
+} // namespace ycrt
 
 #endif //YCRT_UTILS_ERROR_H_

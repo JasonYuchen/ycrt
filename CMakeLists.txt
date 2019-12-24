@@ -8,13 +8,15 @@ aux_source_directory(${PROJECT_SOURCE_DIR}/ycrt SOURCE)
 aux_source_directory(${PROJECT_SOURCE_DIR}/transport SOURCE)
 aux_source_directory(${PROJECT_SOURCE_DIR}/utils SOURCE)
 aux_source_directory(${PROJECT_SOURCE_DIR}/pb SOURCE)
+aux_source_directory(${PROJECT_SOURCE_DIR}/io SOURCE)
+aux_source_directory(${PROJECT_SOURCE_DIR}/settings SOURCE)
 include_directories(.)
 
 add_library(ycrt SHARED ${SOURCE})
 target_link_libraries(ycrt
         PRIVATE
         libspdlog.a
-        libprotobuf.a
+        libprotobuf.so
         pthread)
 
 add_library(ycrt_static STATIC ${SOURCE})
