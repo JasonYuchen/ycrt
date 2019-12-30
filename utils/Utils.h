@@ -5,32 +5,26 @@
 #ifndef YCRT_UTILS_UTILS_H_
 #define YCRT_UTILS_UTILS_H_
 
-#define LIKELY(x) (__builtin_expect((x), 1))
-#define UNLIKELY(x) (__builtin_expect((x), 0))
+/// Libraries for reference:
+// concurrent hash table: https://github.com/efficient/libcuckoo
+// concurrent data structure: https://github.com/khizmax/libcds
 
-#define DEFAULT_COPY_AND_ASSIGN(TypeName)           \
-TypeName(const TypeName&) = default;                \
-TypeName& operator=(const TypeName&) = default
-
-#define DISALLOW_COPY_AND_ASSIGN(TypeName)          \
-TypeName(const TypeName&) = delete;                 \
-TypeName& operator=(const TypeName&) = delete
-
-#define DISALLOW_COPY_MOVE_AND_ASSIGN(TypeName)     \
-TypeName(const TypeName&) = delete;                 \
-TypeName& operator=(const TypeName&) = delete;      \
-TypeName(TypeName&&) = delete;                      \
-TypeName& operator=(const TypeName&&) = delete
+#include <memory>
+#include "Logger.h"
+#include "concurrentqueue/blockingconcurrentqueue.h"
 
 namespace ycrt
 {
 
-namespace utils
-{
+template<typename T>
+using BlockingConcurrentQueue = moodycamel::BlockingConcurrentQueue<T>;
+template<typename T>
+using BlockingConcurrentQueueSPtr = std::shared_ptr<moodycamel::BlockingConcurrentQueue<T>>;
+template<typename T>
+using BlockingConcurrentQueueUPtr = std::unique_ptr<moodycamel::BlockingConcurrentQueue<T>>;
 
 
-
-} // namespace utils
+using slogger = std::shared_ptr<spdlog::logger>;
 
 } // namespace ycrt
 

@@ -6,11 +6,9 @@
 #define YCRT_UTILS_LOGGER_H_
 
 #include <spdlog/sinks/stdout_color_sinks.h>
+#include "utils/Types.h"
 
 namespace ycrt
-{
-
-namespace utils
 {
 
 class Logger {
@@ -22,7 +20,9 @@ class Logger {
   std::shared_ptr<spdlog::logger> get(const char *name) {
     return ins().loggers_[name];
   }
+  // TODO: set pattern, level, sinks, etc...
  private:
+  DISALLOW_COPY_MOVE_AND_ASSIGN(Logger);
   Logger() {
     auto sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
     sink->set_pattern("%Y-%m-%d %H:%M:%S.%f %^%L%$ %n %t %v");
@@ -40,9 +40,7 @@ class Logger {
   static Logger instance_;
 };
 
-} // namespace utils
-
-extern utils::Logger &Log;
+extern Logger &Log;
 
 } // namespace ycrt
 

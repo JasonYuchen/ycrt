@@ -13,6 +13,9 @@ namespace ycrt
 namespace settings
 {
 
+constexpr uint64_t EntryNonCmdSize = 16 * 8;
+constexpr uint64_t LargeEntitySize = 64 * 1024 * 1024;
+
 struct Soft {
   /// Raft
   // MaxEntrySize defines the max total entry size that can be included in

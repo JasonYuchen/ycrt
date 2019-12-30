@@ -7,11 +7,7 @@
 namespace ycrt
 {
 
-namespace utils
-{
 
-} // namespace utils
-
-utils::Logger &Log = utils::Logger::ins();
+Logger &Log = Logger::ins();
 
 } // namespace ycrt

@@ -5,6 +5,7 @@
 #ifndef YCRT_SETTINGS_HARD_H_
 #define YCRT_SETTINGS_HARD_H_
 
+#include "Soft.h"
 #include <stdint.h>
 
 namespace ycrt
@@ -12,6 +13,10 @@ namespace ycrt
 
 namespace settings
 {
+
+constexpr uint64_t SnapshotHeaderSize = 1024;
+constexpr uint64_t MaxMessageBatchSize = LargeEntitySize;
+constexpr uint64_t SnapshotChunkSize = 2 * 1024 * 1024;
 
 struct Hard {
   // StepEngineWorkerCount defines number of workers to use to process raft node

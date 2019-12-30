@@ -6,6 +6,7 @@
 #define YCRT_YCRT_CONFIG_H_
 
 #include <stdint.h>
+#include <functional>
 #include "pb/raft.pb.h"
 
 namespace ycrt
@@ -14,6 +15,15 @@ namespace ycrt
 enum CompressionType {
   NoCompression = raftpb::NoCompression,
   Snappy = raftpb::Snappy,
+};
+
+constexpr uint64_t NoLeader = 0;
+
+struct LeaderInfo {
+  uint64_t ClusterID;
+  uint64_t NodeID;
+  uint64_t Term;
+  uint64_t LeaderID;
 };
 
 struct Config {
@@ -128,10 +138,108 @@ struct Config {
 
   void validate();
 };
+using ConfigSPtr = std::shared_ptr<Config>;
 
 struct NodeHostConfig {
+// DeploymentID is used to determine whether two NodeHost instances belong to
+  // the same deployment and thus allowed to communicate with each other. This
+  // helps to prvent accidentially misconfigured NodeHost instances to cause
+  // data corruption errors by sending out of context messages to unrelated
+  // Raft nodes.
+  // For a particular dragonboat based application, you can set DeploymentID
+  // to the same uint64 value on all production NodeHost instances, then use
+  // different DeploymentID values on your staging and dev environment. It is
+  // also recommended to use different DeploymentID values for different
+  // dragonboat based applications.
+  // When not set, the default value 0 will be used as the deployment ID and
+  // thus allowing all NodeHost instances with deployment ID 0 to communicate
+  // with each other.
+  uint64_t DeploymentID;
+  // WALDir is the directory used for storing the WAL of Raft entries. It is
+  // recommended to use low latency storage such as NVME SSD with power loss
+  // protection to store such WAL data. Leave WALDir to have zero value will
+  // have everything stored in NodeHostDir.
+  std::string WALDir;
+  // NodeHostDir is where everything else is stored.
+  std::string NodeHostDir;
+  // RTTMillisecond defines the average Rround Trip Time (RTT) in milliseconds
+  // between two NodeHost instances. Such a RTT interval is internally used as
+  // a logical clock tick, Raft heartbeat and election intervals are both
+  // defined in term of how many such RTT intervals.
+  // Note that RTTMillisecond is the combined delays between two NodeHost
+  // instances including all delays caused by network transmission, delays
+  // caused by NodeHost queuing and processing. As an example, when fully
+  // loaded, the average Rround Trip Time between two of our NodeHost instances
+  // used for benchmarking purposes is up to 500 microseconds when the ping time
+  // between them is 100 microseconds. Set RTTMillisecond to 1 when it is less
+  // than 1 million in your environment.
+  uint64_t RTTMillisecond;
+  // RaftAddress is a hostname:port or IP:port address used by the Raft RPC
+  // module for exchanging Raft messages and snapshots. This is also the
+  // identifier for a NodeHost instance. RaftAddress should be set to the
+  // public address that can be accessed from remote NodeHost instances.
+  std::string RaftAddress;
+  // ListenAddress is a hostname:port or IP:port address used by the Raft RPC
+  // module to listen on for Raft message and snapshots. When the ListenAddress
+  // field is not set, The Raft RPC module listens on RaftAddress. If 0.0.0.0
+  // is specified as the IP of the ListenAddress, Dragonboat listens to the
+  // specified port on all interfaces. When hostname or domain name is
+  // specified, it is locally resolved to IP addresses first and Dragonboat
+  // listens to all resolved IP addresses.
+  std::string ListenAddress;
+  // MutualTLS defines whether to use mutual TLS for authenticating servers
+  // and clients. Insecure communication is used when MutualTLS is set to
+  // False.
+  // See https://github.com/lni/dragonboat/wiki/TLS-in-Dragonboat for more
+  // details on how to use Mutual TLS.
+  bool MutualTLS;
+  // CAFile is the path of the CA certificate file. This field is ignored when
+  // MutualTLS is false.
+  std::string CAFile;
+  // CertFile is the path of the node certificate file. This field is ignored
+  // when MutualTLS is false.
+  std::string CertFile;
+  // KeyFile is the path of the node key file. This field is ignored when
+  // MutualTLS is false.
+  std::string KeyFile;
+  // MaxSendQueueSize is the maximum size in bytes of each send queue.
+  // Once the maximum size is reached, further replication messages will be
+  // dropped to restrict memory usage. When set to 0, it means the send queue
+  // size is unlimited.
+  uint64_t MaxSendQueueSize;
+  // MaxReceiveQueueSize is the maximum size in bytes of each receive queue.
+  // Once the maximum size is reached, further replication messages will be
+  // dropped to restrict memory usage. When set to 0, it means the queue size
+  // is unlimited.
+  uint64_t MaxReceiveQueueSize;
+  // LogDBFactory is the factory function used for creating the Log DB instance
+  // used by NodeHost. The default zero value causes the default built-in RocksDB
+  // based Log DB implementation to be used.
+  // FIXME: LogDBFactory LogDBFactoryFunc
+  // RaftRPCFactory is the factory function used for creating the Raft RPC
+  // instance for exchanging Raft message between NodeHost instances. The default
+  // zero value causes the built-in TCP based RPC module to be used.
+  // FIXME: RaftRPCFactory RaftRPCFactoryFunc
+  // EnableMetrics determines whether health metrics in Prometheus format should
+  // be enabled.
+  bool EnableMetrics;
+  // RaftEventListener is the listener for Raft events exposed to user space.
+  // NodeHost uses a single dedicated goroutine to invoke all RaftEventListener
+  // methods one by one, CPU intensive or IO related procedures that can cause
+  // long delays should be offloaded to worker goroutines managed by users.
+  std::function<void(LeaderInfo)> RaftEventListener;
+  // MaxSnapshotSendBytesPerSecond defines how much snapshot data can be sent
+  // every second for all Raft clusters managed by the NodeHost instance.
+  // The default value 0 means there is no limit set for snapshot streaming.
+  uint64_t MaxSnapshotSendBytesPerSecond;
+  // MaxSnapshotRecvBytesPerSecond defines how much snapshot data can be
+  // received each second for all Raft clusters managed by the NodeHost instance.
+  // The default value 0 means there is no limit for receiving snapshot data.
+  uint64_t MaxSnapshotRecvBytesPerSecond;
 
+  void validate();
 };
+using NodeHostConfigSPtr = std::shared_ptr<NodeHostConfig>;
 
 } // namespace ycrt
 
