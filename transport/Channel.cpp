@@ -45,6 +45,11 @@ bool SendChannel::asyncSendMessage(MessageUPtr m)
     });
   }
 }
+
+SendChannel::~SendChannel()
+{
+}
+
 void SendChannel::sendMessage()
 {
   boost::asio::async_write(socket_,
@@ -94,6 +99,11 @@ void RecvChannel::start()
 {
   readHeader();
 }
+
+RecvChannel::~RecvChannel()
+{
+}
+
 void RecvChannel::readHeader()
 {
   boost::asio::async_read(

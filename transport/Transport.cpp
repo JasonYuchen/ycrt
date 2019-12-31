@@ -27,7 +27,13 @@ unique_ptr<Transport> Transport::New(
   function<std::string(uint64_t, uint64_t)> snapshotDirFunc,
   uint64_t ioContexts)
 {
-  return unique_ptr<Transport>();
+  auto transport = make_unique<Transport>();
+  transport->nhConfig_ = std::move(nhConfig);
+  transport->resolver_ = std::move(resolver);
+  transport->handlers_ = std::move(handlers);
+  transport->deploymentID_ = nhConfig_->DeploymentID;
+  transport->ioctxs_.resize(ioContexts);
+  return transport;
 }
 
 Transport::Transport()
@@ -37,7 +43,8 @@ Transport::Transport()
     streamConnections_(Soft::ins().StreamConnections),
     sendQueueLength_(Soft::ins().SendQueueLength),
     getConnectedTimeoutS_(Soft::ins().GetConnectedTimeoutS),
-    idleTimeoutS_(60) // TODO: add idleTimeoutS to soft?
+    idleTimeoutS_(60), // TODO: add idleTimeoutS to soft?
+    deploymentID_(0)
 {
 }
 
@@ -66,7 +73,7 @@ void Transport::start()
   ip::tcp::endpoint endpoint(
     ip::make_address(nhConfig_->ListenAddress),
     stoi(nhConfig_->ListenAddress.substr(pos)));
-  auto conn = make_shared<RecvChannel>(io_);
+  auto conn = make_shared<RecvChannel>(nextIOContext());
   acceptor_.async_accept(
     conn->socket(),
     [conn = std::move(conn), this](const error_code &error) mutable {
@@ -76,7 +83,22 @@ void Transport::start()
         conn->setRequestHandlerPtr(
           [this](MessageBatchUPtr m)
           {
-            // TODO
+            if (m->deployment_id() != deploymentID_) {
+              log->warn("deployment id does not match,"
+                        " received {0:d}, actual {1:d}, message dropped",
+                        m->deployment_id(), deploymentID_);
+            }
+            // FIXME: Check RPC Bin Ver
+            const string &addr = m->source_address();
+            if (!addr.empty()) {
+              for (auto &req : m->requests()) {
+                if (req.from() != 0) {
+                  resolver_->addRemoteAddress(req.cluster_id(), req.from(), addr);
+                }
+              }
+            }
+            handlers_->handleMessageBatch(std::move(m));
+            // TODO: metrics
           });
         conn->setChunkHandlerPtr(
           [this](SnapshotChunkUPtr m)
@@ -87,6 +109,11 @@ void Transport::start()
       }
       start();
     });
+}
+boost::asio::io_context &Transport::nextIOContext()
+{
+  static uint64_t idx = 0;
+  return ioctxs_[idx++ % ioctxs_.size()].io;
 }
 
 } // namespace transport
