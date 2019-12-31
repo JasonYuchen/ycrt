@@ -15,14 +15,13 @@
 #include "pb/RaftMessage.h"
 #include "utils/Utils.h"
 #include "settings/Hard.h"
+#include "Nodes.h"
 
 namespace ycrt
 {
 
 namespace transport
 {
-
-
 
 class Transport {
  public:
@@ -32,12 +31,12 @@ class Transport {
     RaftMessageHandlerSPtr handlers,
     std::function<std::string(uint64_t, uint64_t)> snapshotDirFunc,
     uint64_t ioContexts);
-  std::string name();
+  //std::string name();
   //void setUnmanagedDeploymentID();
-  void setDeploymentID(uint64_t id);
+  void setDeploymentID(uint64_t id) { deploymentID_ = id; }
 
   bool asyncSendMessage(MessageUPtr m);
-  bool asyncSendSnapshot(MessageUPtr m);
+  //bool asyncSendSnapshot(MessageUPtr m);
   //std::shared_ptr<Sink> getStreamConnection(uint64_t clusterID, uint64_t nodeID);
   void start();
   void stop() { io_.stop(); }

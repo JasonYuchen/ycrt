@@ -11,6 +11,7 @@
 #include "settings/Hard.h"
 #include "pb/RaftMessage.h"
 #include "utils/Utils.h"
+#include "ycrt/Config.h"
 
 namespace ycrt
 {
@@ -35,7 +36,7 @@ struct RequestHeader {
   }
   // FIXME
   static RequestHeader decode(const char *buf, size_t len) {
-    RequestHeader header();
+    RequestHeader header{};
     ::memcpy(&header.method, &buf[0], 4);
     ::memcpy(&header.crc32, &buf[4], 4);
     ::memcpy(&header.size, &buf[8], 8);
@@ -45,11 +46,11 @@ struct RequestHeader {
 
 static_assert(RequestHeaderSize == sizeof(RequestHeader), "RequestHeaderSize != 16");
 
-class NodeInfo {
- public:
-  std::string key;
-  boost::asio::ip::tcp::resolver::results_type endpoints;
-};
+//class NodeInfo {
+// public:
+//  std::string key;
+//  boost::asio::ip::tcp::resolver::results_type endpoints;
+//};
 using NodeInfoSPtr = std::shared_ptr<NodeInfo>;
 
 class NodeAddressResolver {

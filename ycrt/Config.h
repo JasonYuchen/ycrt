@@ -26,6 +26,23 @@ struct LeaderInfo {
   uint64_t LeaderID;
 };
 
+struct NodeInfo {
+  uint64_t ClusterID;
+  uint64_t NodeID;
+};
+
+inline bool operator==(const NodeInfo &lhs, const NodeInfo &rhs)
+{
+  return lhs.NodeID == rhs.NodeID && lhs.ClusterID == rhs.ClusterID;
+}
+
+struct NodeInfoHash {
+  size_t operator()(const NodeInfo& rhs) const {
+    return std::hash<uint64_t>()(rhs.ClusterID)
+      ^ std::hash<uint64_t>()(rhs.NodeID);
+  }
+};
+
 struct Config {
   // NodeID is a non-zero value used to identify a node within a Raft cluster.
   uint64_t NodeID;
