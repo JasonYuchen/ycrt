@@ -157,10 +157,11 @@ void RecvChannel::readHeader()
         return;
       } else {
         if (ec) {
-          log->warn("");
+          log->error("RecvChannel closed due to async_read error {0}");
         } else {
-
+          log->error("RecvChannel closed due to invalid header");
         }
+        socket_.close();
       }
     });
 }
@@ -172,9 +173,10 @@ void RecvChannel::readPayload()
     [this, self = shared_from_this()](error_code ec, size_t length)
     {
       if (!ec) {
+        // FIXME: check crc32
         if (header_.method == RequestType) {
           auto msg = make_unique<raftpb::MessageBatch>();
-          auto done = msg->ParseFromArray(payloadBuf_.data(), payloadBuf_.size());
+          auto done = msg->ParseFromArray(payloadBuf_.data(), header_.size);
           if (!done) {
             //rpc_->error();
             return;
@@ -182,27 +184,43 @@ void RecvChannel::readPayload()
           requestHandler_(std::move(msg));
         } else if (header_.method == SnapshotChunkType) {
           auto msg = make_unique<raftpb::SnapshotChunk>();
-          auto done = msg->ParseFromArray(payloadBuf_.data(), payloadBuf_.size());
+          auto done = msg->ParseFromArray(payloadBuf_.data(), header_.size);
           if (!done) {
             //Log.get("transport")->error();
             return;
           }
           chunkHandler_(std::move(msg));
         } else {
-          //Log.get("transport")->
+          // should not reach here
+          log->error("RecvChannel closed due to invalid method type");
+          socket_.close();
+          return;
         }
         readHeader();
       } else if (ec.value() == error::operation_aborted) {
         return;
       } else {
-        // warning;
+        log->error("RecvChannel closed due to async_read error {0}", ec.message());
+        socket_.close();
       }
     });
 }
 
 bool RecvChannel::decodeHeader()
 {
-  // FIXME
+  header_ = RequestHeader::decode(headerBuf_, RequestHeaderSize);
+  if (header_.method != RequestType && header_.method != SnapshotChunkType) {
+    log->error("invalid method");
+    return false;
+  }
+  if (header_.size == 0) {
+    log->error("invalid payload size");
+    return false;
+  }
+  if (header_.size > payloadBuf_.size()) {
+    payloadBuf_.resize(header_.size);
+  }
+  // FIXME: check crc32
   return true;
 }
 
