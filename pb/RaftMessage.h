@@ -14,6 +14,8 @@ using MessageBatchSPtr = std::shared_ptr<raftpb::MessageBatch>;
 using MessageBatchUPtr = std::unique_ptr<raftpb::MessageBatch>;
 using MessageSPtr = std::shared_ptr<raftpb::Message>;
 using MessageUPtr = std::unique_ptr<raftpb::Message>;
+using SnapshotChunkSPtr = std::shared_ptr<raftpb::SnapshotChunk>;
+using SnapshotChunkUPtr = std::unique_ptr<raftpb::SnapshotChunk>;
 
 } // namespace ycrt
 

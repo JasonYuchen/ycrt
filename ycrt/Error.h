@@ -12,9 +12,9 @@ namespace ycrt
 {
 
 enum ErrorCode : int32_t {
-  errBatchSendSkipped = 1,
-  errChunkSendSkipped = 2,
-
+  errInvalidConfig = 1,
+  errBatchSendSkipped = 2,
+  errChunkSendSkipped = 3,
 };
 
 class Error : public std::runtime_error {
@@ -25,12 +25,18 @@ class Error : public std::runtime_error {
     : std::runtime_error(what), code_(code) {}
  private:
   friend bool operator==(const Error &lhs, const Error &rhs);
+  friend bool operator==(const Error &err, const ErrorCode &code);
   ErrorCode code_;
 };
 
 inline bool operator==(const Error &lhs, const Error &rhs)
 {
   return lhs.code_ == rhs.code_;
+}
+
+inline bool operator==(const Error &err, const ErrorCode &code)
+{
+  return err.code_ == code;
 }
 
 } // namespace ycrt
