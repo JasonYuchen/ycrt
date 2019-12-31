@@ -81,10 +81,8 @@ void Transport::start()
   auto conn = make_shared<RecvChannel>(this, nextIOContext());
   acceptor_.async_accept(
     conn->socket(),
-    [conn = std::move(conn), this](const error_code &error) mutable {
-      if (error) {
-        log->warn("accept error: {0}", error.message());
-      } else {
+    [conn = std::move(conn), this](const error_code &ec) mutable {
+      if (!ec) {
         conn->setRequestHandlerPtr(
           [this](MessageBatchUPtr m)
           {
@@ -113,6 +111,10 @@ void Transport::start()
             log->warn("snapshot chunk not supported currently");
           });
         conn->start();
+      } else if (ec.value() == error::operation_aborted) {
+        return;
+      } else {
+        log->warn("accept error: {0}", ec.message());
       }
       start();
     });

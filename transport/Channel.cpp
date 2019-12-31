@@ -63,6 +63,7 @@ bool SendChannel::asyncSendMessage(MessageUPtr m)
       outputQueue_.push(std::move(batch));
       // do output
       if (!inProgress) {
+        log->debug("SendChannel to {0} with next message {1}", nodeInfo_->key, outputQueue_.front()->DebugString());
         outputQueue_.front()->SerializeToString(&buffer_);
         sendMessage();
       }
@@ -72,7 +73,6 @@ bool SendChannel::asyncSendMessage(MessageUPtr m)
 
 SendChannel::~SendChannel()
 {
-  socket_.close();
 }
 
 void SendChannel::sendMessage()
@@ -87,11 +87,14 @@ void SendChannel::sendMessage()
           outputQueue_.front()->SerializeToString(&buffer_);
           sendMessage();
         }
+      } else if (ec.value() == error::operation_aborted) {
+        return;
       } else {
         // FIXME: do log, nodeInfo_->key ?
         log->warn("SendChannel to {0} closed due to async_write error {1}",
           nodeInfo_->key, ec.message());
         transport_->removeSendChannel(nodeInfo_->key);
+        socket_.close();
         // shutdown, remove this channel from sendChannels_;
       }
     });
@@ -104,17 +107,21 @@ void SendChannel::connect()
     nodeInfo_->endpoints,
     [this, self = shared_from_this()](error_code ec, ip::tcp::endpoint endpoint)
     {
+      log->debug("SendChannel connect to {0} returned {1}", endpoint.address().to_string(), ec.message());
       if (!ec) {
         isConnected_ = true;
         if (!outputQueue_.empty()) {
           outputQueue_.front()->SerializeToString(&buffer_);
           sendMessage();
         }
+      } else if (ec.value() == error::operation_aborted) {
+        return;
       } else {
         // do log
-        log->warn("SendChannel to {0} closed due to connect error {1}",
+        log->warn("SendChannel to {0} closed due to async_connect error {1}",
           nodeInfo_->key, ec.message());
         transport_->removeSendChannel(nodeInfo_->key);
+        socket_.close();
         // shutdown, remove this channel from sendChannels_;
       }
     });
@@ -135,7 +142,6 @@ void RecvChannel::start()
 
 RecvChannel::~RecvChannel()
 {
-  socket_.close();
 }
 
 void RecvChannel::readHeader()
@@ -147,6 +153,8 @@ void RecvChannel::readHeader()
     {
       if (!ec && decodeHeader()) {
         readPayload();
+      } else if (ec.value() == error::operation_aborted) {
+        return;
       } else {
         if (ec) {
           log->warn("");
@@ -184,6 +192,8 @@ void RecvChannel::readPayload()
           //Log.get("transport")->
         }
         readHeader();
+      } else if (ec.value() == error::operation_aborted) {
+        return;
       } else {
         // warning;
       }
