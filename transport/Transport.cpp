@@ -24,15 +24,17 @@ unique_ptr<Transport> Transport::New(
   NodeHostConfigSPtr nhConfig,
   NodeAddressResolverSPtr resolver,
   RaftMessageHandlerSPtr handlers,
-  function<std::string(uint64_t, uint64_t)> snapshotDirFunc,
+  function<string(uint64_t, uint64_t)> snapshotDirFunc,
   uint64_t ioContexts)
 {
-  auto transport = make_unique<Transport>();
+  unique_ptr<Transport> transport(new Transport());
   transport->nhConfig_ = std::move(nhConfig);
   transport->resolver_ = std::move(resolver);
   transport->handlers_ = std::move(handlers);
   transport->deploymentID_ = nhConfig_->DeploymentID;
-  transport->ioctxs_.resize(ioContexts);
+  for (size_t i = 0; i < ioContexts; ++i) {
+    transport->ioctxs_.emplace_back(new ioctx());
+  }
   return transport;
 }
 
@@ -44,27 +46,30 @@ Transport::Transport()
     sendQueueLength_(Soft::ins().SendQueueLength),
     getConnectedTimeoutS_(Soft::ins().GetConnectedTimeoutS),
     idleTimeoutS_(60), // TODO: add idleTimeoutS to soft?
-    deploymentID_(0)
+    deploymentID_(0),
+    ioctxIdx_(0)
 {
 }
 
 bool Transport::asyncSendMessage(MessageUPtr m)
 {
-  shared_ptr<NodeInfo> node =
-    resolver_->resolve(m->cluster_id(), m->to());
+  shared_ptr<NodeInfo> node = resolver_->resolve(m->cluster_id(), m->to());
   if (node == nullptr) {
     log->warn(
-      "{0} do not have the address for {1}:{2}, dropping a message",
+      "{0} do not have the address for {1:d}:{2:d}, dropping a message",
       sourceAddress_, m->cluster_id(), m->to());
   }
-  auto ch = sendChannels_.find(node->key);
-  string test;
-  if (ch == sendChannels_.end()) {
-    sendChannels_[node->key] = make_unique<SendChannel>(io_, node, sendQueueLength_);
-    //sendChannels_.insert({test, new Channel(io_, node, sendQueueLength_)});
-    ch = sendChannels_.find(node->key);
+  SendChannelSPtr ch;
+  {
+    lock_guard<mutex> guard(mutex_);
+    auto it = sendChannels_.find(node->key);
+    if (it == sendChannels_.end()) {
+      ch = make_shared<SendChannel>(
+        this, io_, sourceAddress_, node, sendQueueLength_);
+      sendChannels_[node->key] = ch;
+    }
   }
-  ch->second->asyncSendMessage(std::move(m));
+  ch->asyncSendMessage(std::move(m));
 }
 
 void Transport::start()
@@ -73,7 +78,7 @@ void Transport::start()
   ip::tcp::endpoint endpoint(
     ip::make_address(nhConfig_->ListenAddress),
     stoi(nhConfig_->ListenAddress.substr(pos)));
-  auto conn = make_shared<RecvChannel>(nextIOContext());
+  auto conn = make_shared<RecvChannel>(this, nextIOContext());
   acceptor_.async_accept(
     conn->socket(),
     [conn = std::move(conn), this](const error_code &error) mutable {
@@ -93,7 +98,8 @@ void Transport::start()
             if (!addr.empty()) {
               for (auto &req : m->requests()) {
                 if (req.from() != 0) {
-                  resolver_->addRemoteAddress(req.cluster_id(), req.from(), addr);
+                  resolver_->addRemoteAddress(
+                    req.cluster_id(), req.from(), addr);
                 }
               }
             }
@@ -104,16 +110,23 @@ void Transport::start()
           [this](SnapshotChunkUPtr m)
           {
             // TODO
+            log->warn("snapshot chunk not supported currently");
           });
         conn->start();
       }
       start();
     });
 }
-boost::asio::io_context &Transport::nextIOContext()
+
+void Transport::removeSendChannel(string &key)
 {
-  static uint64_t idx = 0;
-  return ioctxs_[idx++ % ioctxs_.size()].io;
+    lock_guard<mutex> guard(mutex_);
+    sendChannels_.erase(key);
+}
+
+io_context &Transport::nextIOContext()
+{
+  return ioctxs_[ioctxIdx_++ % ioctxs_.size()]->io;
 }
 
 } // namespace transport

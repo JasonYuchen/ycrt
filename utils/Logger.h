@@ -18,6 +18,7 @@ class Logger {
     return logger;
   }
   std::shared_ptr<spdlog::logger> get(const char *name) {
+    assert(loggers_.find(name) != loggers_.end());
     return ins().loggers_[name];
   }
   // TODO: set pattern, level, sinks, etc...

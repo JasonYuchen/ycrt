@@ -3,9 +3,11 @@
 //
 
 #include "Channel.h"
+#include "Transport.h"
 
 using namespace std;
 using namespace boost::asio;
+using namespace boost::asio::chrono;
 
 namespace ycrt
 {
@@ -13,8 +15,18 @@ namespace ycrt
 namespace transport
 {
 
-SendChannel::SendChannel(io_context &io, NodeInfoSPtr node, uint64_t queueLen)
-  : io_(io),
+SendChannel::SendChannel(
+  Transport *tranport,
+  io_context &io,
+  string source,
+  NodeInfoSPtr node,
+  uint64_t queueLen)
+  : transport_(tranport),
+    log(Log.get("transport")),
+    isConnected_(false),
+    inQueue_(false),
+    sourceAddress_(std::move(source)),
+    io_(io),
     socket_(io),
     nodeInfo_(std::move(node)),
     bufferQueue_(make_shared<BlockingConcurrentQueue<MessageUPtr>>(queueLen))
@@ -22,21 +34,33 @@ SendChannel::SendChannel(io_context &io, NodeInfoSPtr node, uint64_t queueLen)
   connect();
 }
 
+// one channel per remote raft node,
+// asyncSendMessage of each SendChannel will only be called in one thread
 bool SendChannel::asyncSendMessage(MessageUPtr m)
 {
   auto done = bufferQueue_->try_enqueue(std::move(m));
   if (!done) {
     // message dropped due to queue length
-  } else if (isConnected_) {
+    log->warn("message dropped due to queue size");
+  } else if (isConnected_ && !inQueue_.exchange(true)) {
+    // inQueue to prevent too many pending posted callbacks
     boost::asio::post(io_, [this, self = shared_from_this()](){
-      // fetch all in bufferQueue
+      inQueue_ = false;
+      // fetch all in bufferQueue, 10 ?
       vector<MessageUPtr> items(10);
       auto count = bufferQueue_->try_dequeue_bulk(items.begin(), 10);
+      if (count == 0) {
+        return;
+      }
       // put it in output Queue
       bool inProgress = !outputQueue_.empty();
+      auto batch = make_unique<raftpb::MessageBatch>();
+      batch->set_source_address(sourceAddress_);
+      // TODO: MessageBatch rpc bin ver
       for (size_t i = 0; i < count; ++i) {
-        outputQueue_.push(std::move(items[i]));
+        batch->mutable_requests()->AddAllocated(items[i].release());
       }
+      outputQueue_.push(std::move(batch));
       // do output
       if (!inProgress) {
         outputQueue_.front()->SerializeToString(&buffer_);
@@ -48,6 +72,7 @@ bool SendChannel::asyncSendMessage(MessageUPtr m)
 
 SendChannel::~SendChannel()
 {
+  socket_.close();
 }
 
 void SendChannel::sendMessage()
@@ -63,8 +88,10 @@ void SendChannel::sendMessage()
           sendMessage();
         }
       } else {
-        // do log
-        socket_.close();
+        // FIXME: do log, nodeInfo_->key ?
+        log->warn("SendChannel to {0} closed due to async_write error {1}",
+          nodeInfo_->key, ec.message());
+        transport_->removeSendChannel(nodeInfo_->key);
         // shutdown, remove this channel from sendChannels_;
       }
     });
@@ -75,23 +102,29 @@ void SendChannel::connect()
   boost::asio::async_connect(
     socket_,
     nodeInfo_->endpoints,
-    [this](error_code ec, ip::tcp::endpoint endpoint)
+    [this, self = shared_from_this()](error_code ec, ip::tcp::endpoint endpoint)
     {
-      if (ec) {
-        // do log
-        // shutdown, remove this channel from sendChannels_;
-      } else {
+      if (!ec) {
         isConnected_ = true;
         if (!outputQueue_.empty()) {
           outputQueue_.front()->SerializeToString(&buffer_);
           sendMessage();
         }
+      } else {
+        // do log
+        log->warn("SendChannel to {0} closed due to connect error {1}",
+          nodeInfo_->key, ec.message());
+        transport_->removeSendChannel(nodeInfo_->key);
+        // shutdown, remove this channel from sendChannels_;
       }
     });
 }
 
-RecvChannel::RecvChannel(io_context &io)
-  : socket_(io), payloadBuf_(PayloadBufSize)
+RecvChannel::RecvChannel(Transport *tranport, io_context &io)
+  : transport_(tranport),
+    log(Log.get("transport")),
+    socket_(io),
+    payloadBuf_(PayloadBufSize)
 {
 }
 
@@ -102,6 +135,7 @@ void RecvChannel::start()
 
 RecvChannel::~RecvChannel()
 {
+  socket_.close();
 }
 
 void RecvChannel::readHeader()
@@ -114,7 +148,11 @@ void RecvChannel::readHeader()
       if (!ec && decodeHeader()) {
         readPayload();
       } else {
-        // warning
+        if (ec) {
+          log->warn("");
+        } else {
+
+        }
       }
     });
 }

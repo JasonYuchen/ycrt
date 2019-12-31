@@ -41,6 +41,7 @@ class Transport {
   //std::shared_ptr<Sink> getStreamConnection(uint64_t clusterID, uint64_t nodeID);
   void start();
   void stop() { io_.stop(); }
+  void removeSendChannel(std::string &key);
  private:
   Transport();
   boost::asio::io_context &nextIOContext();
@@ -52,7 +53,8 @@ class Transport {
     boost::asio::io_context io;
     std::thread executor;
   };
-  std::vector<ioctx> ioctxs_;
+  uint64_t ioctxIdx_;
+  std::vector<std::shared_ptr<ioctx>> ioctxs_;
   boost::asio::ip::tcp::acceptor acceptor_;
   uint64_t streamConnections_;
   uint64_t sendQueueLength_;
@@ -61,7 +63,7 @@ class Transport {
   uint64_t deploymentID_;
 
   std::mutex mutex_;
-  std::unordered_map<std::string, SendChannelUPtr> sendChannels_; // GUARDED BY mutex_;
+  std::unordered_map<std::string, SendChannelSPtr> sendChannels_; // GUARDED BY mutex_;
   BlockingConcurrentQueueUPtr<MessageBatchUPtr> outputQueue_;
   // std::unordered_map<std::string, CircuitBreaker> breakers_;
   // uint32_t lanes_;

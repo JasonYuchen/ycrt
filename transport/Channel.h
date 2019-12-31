@@ -68,29 +68,40 @@ class RaftMessageHandler {
 };
 using RaftMessageHandlerSPtr = std::shared_ptr<RaftMessageHandler>;
 
+class Transport;
 class SendChannel : public std::enable_shared_from_this<SendChannel> {
  public:
-  explicit SendChannel(boost::asio::io_context &io, NodeInfoSPtr node, uint64_t queueLength);
+  explicit SendChannel(
+    Transport *tranport,
+    boost::asio::io_context &io,
+    std::string source,
+    NodeInfoSPtr node,
+    uint64_t queueLength);
   bool asyncSendMessage(MessageUPtr m);
   ~SendChannel();
  private:
   void sendMessage();
   void connect();
+  slogger log;
+  Transport *transport_;
   std::atomic_bool isConnected_;
+  std::atomic_bool inQueue_;
+  std::string sourceAddress_;
   boost::asio::io_context &io_;
   boost::asio::ip::tcp::socket socket_;
   NodeInfoSPtr nodeInfo_;
   BlockingConcurrentQueueSPtr<MessageUPtr> bufferQueue_;
-  std::queue<MessageUPtr> outputQueue_;
+  std::queue<MessageBatchUPtr> outputQueue_;
   std::string buffer_;
 };
+using SendChannelSPtr = std::shared_ptr<SendChannel>;
 using SendChannelUPtr = std::unique_ptr<SendChannel>;
 
 using RequestHandler = std::function<void(MessageBatchUPtr)>;
 using ChunkHandler = std::function<void(SnapshotChunkUPtr)>;
 class RecvChannel : public std::enable_shared_from_this<RecvChannel> {
  public:
-  explicit RecvChannel(boost::asio::io_context &io);
+  explicit RecvChannel(Transport *tranport, boost::asio::io_context &io);
   boost::asio::ip::tcp::socket &socket() {return socket_;}
   void setRequestHandlerPtr(RequestHandler handler) { requestHandler_ = std::move(handler); }
   void setChunkHandlerPtr(ChunkHandler handler) { chunkHandler_ = std::move(handler); }
@@ -100,6 +111,8 @@ class RecvChannel : public std::enable_shared_from_this<RecvChannel> {
   void readHeader();
   void readPayload();
   bool decodeHeader();
+  slogger log;
+  Transport *transport_;
   boost::asio::ip::tcp::socket socket_;
   RequestHeader header_;
   char headerBuf_[RequestHeaderSize];
@@ -107,6 +120,8 @@ class RecvChannel : public std::enable_shared_from_this<RecvChannel> {
   RequestHandler requestHandler_;
   ChunkHandler chunkHandler_;
 };
+using RecvChannelSPtr = std::shared_ptr<RecvChannel>;
+using RecvChannelUPtr = std::unique_ptr<RecvChannel>;
 
 } // namespace transport
 
