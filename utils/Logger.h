@@ -37,7 +37,7 @@ class Logger {
     loggers_["test"] = std::make_shared<spdlog::logger>("test", sink);
     loggers_["transport"] = std::make_shared<spdlog::logger>("transport", sink);
   }
-  std::unordered_map<const char *, std::shared_ptr<spdlog::logger>> loggers_;
+  std::unordered_map<std::string, std::shared_ptr<spdlog::logger>> loggers_;
   static Logger instance_;
 };
 
