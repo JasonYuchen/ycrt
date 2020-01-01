@@ -12,6 +12,21 @@ namespace transport
 {
 
 using namespace std;
+using namespace boost::asio;
+
+ip::tcp::endpoint getEndpoint(const string &addrPort) // name:port
+{
+  auto pos = addrPort.find(':');
+  return {ip::make_address(addrPort.substr(0, pos)),
+          static_cast<unsigned short>(stoi(addrPort.substr(pos+1)))};
+}
+
+ip::tcp::endpoint getEndpoint(string_view addrPort) // name:port
+{
+  auto pos = addrPort.find(':');
+  return {ip::make_address(addrPort.substr(0, pos)),
+          static_cast<unsigned short>(stoi(addrPort.substr(pos+1).data()))};
+}
 
 shared_ptr<Nodes> Nodes::New(function<uint64_t(uint64_t)> &&partitionIDFunc)
 {
@@ -25,9 +40,9 @@ Nodes::Nodes()
 {
 }
 
-Nodes::record::record(const std::string &key)
+Nodes::record::record(const std::string &key) // key = 127.0.0.1:8080-1
   : key(key),
-    address(key.data(), key.find(':')),
+    address(key.data(), key.find('-')),
     port(std::stol(&key[key.find(':') + 1]))
 {
 }
