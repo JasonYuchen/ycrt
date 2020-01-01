@@ -20,35 +20,44 @@ using namespace boost::asio;
 using boost::system::error_code;
 using boost::system::system_error;
 
-unique_ptr<Transport> Transport::New(
+shared_ptr<Transport> Transport::New(
   NodeHostConfigSPtr nhConfig,
   NodesSPtr resolver,
   RaftMessageHandlerSPtr handlers,
   function<string(uint64_t, uint64_t)> &&snapshotDirFunc,
   uint64_t ioContexts)
 {
-  unique_ptr<Transport> transport(new Transport());
-  transport->nhConfig_ = std::move(nhConfig);
+  shared_ptr<Transport> transport(new Transport(std::move(nhConfig)));
   transport->resolver_ = std::move(resolver);
   transport->handlers_ = std::move(handlers);
-  transport->deploymentID_ = nhConfig_->DeploymentID;
   for (size_t i = 0; i < ioContexts; ++i) {
     transport->ioctxs_.emplace_back(new ioctx());
   }
   return transport;
 }
 
-Transport::Transport()
+Transport::Transport(NodeHostConfigSPtr nhConfig)
   : log(Log.get("transport")),
-    io_(),
-    acceptor_(io_),
+    nhConfig_(std::move(nhConfig)),
+    io_(1),
+    worker_(io_),
+    main_([this](){ io_.run(); }),
+    stopped_(false),
+    ioctxIdx_(0),
+    ioctxs_(),
+    acceptor_(io_, getEndpoint(string_view(nhConfig_->ListenAddress))),
     streamConnections_(Soft::ins().StreamConnections),
     sendQueueLength_(Soft::ins().SendQueueLength),
     getConnectedTimeoutS_(Soft::ins().GetConnectedTimeoutS),
     idleTimeoutS_(60), // TODO: add idleTimeoutS to soft?
-    deploymentID_(0),
-    ioctxIdx_(0)
+    deploymentID_(nhConfig_->DeploymentID),
+    mutex_(),
+    sendChannels_(),
+    sourceAddress_(nhConfig_->RaftAddress),
+    resolver_(),
+    handlers_()
 {
+  log->info("start listening on {0}", nhConfig_->ListenAddress);
 }
 
 bool Transport::asyncSendMessage(MessageUPtr m)
@@ -58,6 +67,7 @@ bool Transport::asyncSendMessage(MessageUPtr m)
     log->warn(
       "{0} do not have the address for {1:d}:{2:d}, dropping a message",
       sourceAddress_, m->cluster_id(), m->to());
+    return false;
   }
   SendChannelSPtr ch;
   {
@@ -67,22 +77,21 @@ bool Transport::asyncSendMessage(MessageUPtr m)
       ch = make_shared<SendChannel>(
         this, nextIOContext(), sourceAddress_, node, sendQueueLength_);
       sendChannels_[node->key] = ch;
+      ch->start();
     }
   }
   ch->asyncSendMessage(std::move(m));
+  return true;
 }
 
 void Transport::start()
 {
-  auto pos = nhConfig_->ListenAddress.find(':');
-  ip::tcp::endpoint endpoint(
-    ip::make_address(nhConfig_->ListenAddress),
-    stoi(nhConfig_->ListenAddress.substr(pos)));
   auto conn = make_shared<RecvChannel>(this, nextIOContext());
   acceptor_.async_accept(
     conn->socket(),
-    [conn = std::move(conn), this](const error_code &ec) mutable {
+    [conn, this](const error_code &ec) mutable {
       if (!ec) {
+        log->info("new connection received from {0}", conn->socket().remote_endpoint().address().to_string());
         conn->setRequestHandlerPtr(
           [this](MessageBatchUPtr m)
           {
@@ -90,6 +99,7 @@ void Transport::start()
               log->warn("deployment id does not match,"
                         " received {0:d}, actual {1:d}, message dropped",
                         m->deployment_id(), deploymentID_);
+              return;
             }
             // FIXME: Check RPC Bin Ver
             const string &addr = m->source_address();
@@ -120,15 +130,35 @@ void Transport::start()
     });
 }
 
+void Transport::stop()
+{
+  if (!stopped_.exchange(true)) {
+    {
+      lock_guard<mutex> guard(mutex_);
+      sendChannels_.clear();
+    }
+    ioctxs_.clear();
+    io_.stop();
+    main_.join();
+  }
+}
+
 void Transport::removeSendChannel(const string &key)
 {
     lock_guard<mutex> guard(mutex_);
     sendChannels_.erase(key);
 }
 
+Transport::~Transport()
+{
+  if (!stopped_) {
+    stop();
+  }
+}
+
 io_context &Transport::nextIOContext()
 {
-  return ioctxs_[ioctxIdx_++ % ioctxs_.size()]->io;
+  return ioctxs_[ioctxIdx_.fetch_add(1) % ioctxs_.size()]->io;
 }
 
 } // namespace transport

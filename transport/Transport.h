@@ -26,7 +26,7 @@ namespace transport
 
 class Transport {
  public:
-  std::unique_ptr<Transport> New(
+  static std::shared_ptr<Transport> New(
     NodeHostConfigSPtr nhConfig,
     NodesSPtr resolver,
     RaftMessageHandlerSPtr handlers,
@@ -35,25 +35,32 @@ class Transport {
   //std::string name();
   //void setUnmanagedDeploymentID();
   void setDeploymentID(uint64_t id) { deploymentID_ = id; }
+  uint64_t deploymentID() { return deploymentID_; }
 
   bool asyncSendMessage(MessageUPtr m);
   //bool asyncSendSnapshot(MessageUPtr m);
   //std::shared_ptr<Sink> getStreamConnection(uint64_t clusterID, uint64_t nodeID);
   void start();
-  void stop() { io_.stop(); }
+  void stop();
   void removeSendChannel(const std::string &key);
+  ~Transport();
  private:
-  Transport();
+  Transport(NodeHostConfigSPtr);
   boost::asio::io_context &nextIOContext();
   slogger log;
+  NodeHostConfigSPtr nhConfig_;
   boost::asio::io_context io_;
+  boost::asio::io_context::work worker_;
+  std::thread main_;
+  std::atomic_bool stopped_;
   struct ioctx {
-    ioctx() : io(), executor([this](){io.run();}) {}
+    ioctx() : io(1), worker(io), executor([this](){io.run();}) {}
     ~ioctx() { io.stop(); executor.join(); }
     boost::asio::io_context io;
+    boost::asio::io_context::work worker;
     std::thread executor;
   };
-  uint64_t ioctxIdx_;
+  std::atomic_uint64_t ioctxIdx_;
   std::vector<std::shared_ptr<ioctx>> ioctxs_;
   boost::asio::ip::tcp::acceptor acceptor_;
   uint64_t streamConnections_;
@@ -64,12 +71,11 @@ class Transport {
 
   std::mutex mutex_;
   std::unordered_map<std::string, SendChannelSPtr> sendChannels_; // GUARDED BY mutex_;
-  BlockingConcurrentQueueUPtr<MessageBatchUPtr> outputQueue_;
+  // BlockingConcurrentQueueUPtr<MessageBatchUPtr> outputQueue_;
   // std::unordered_map<std::string, CircuitBreaker> breakers_;
   // uint32_t lanes_;
   // TransportMetrics metrics_;
   // server::Context serverCtx_;
-  NodeHostConfigSPtr nhConfig_;
   std::string sourceAddress_;
   NodesSPtr resolver_;
   RaftMessageHandlerSPtr handlers_;
