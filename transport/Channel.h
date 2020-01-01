@@ -12,6 +12,7 @@
 #include "pb/RaftMessage.h"
 #include "utils/Utils.h"
 #include "ycrt/Config.h"
+#include "Nodes.h"
 
 namespace ycrt
 {
@@ -44,34 +45,8 @@ struct RequestHeader {
   }
 };
 
-static_assert(RequestHeaderSize == sizeof(RequestHeader), "RequestHeaderSize != 16");
-
-//class NodeInfo {
-// public:
-//  std::string key;
-//  boost::asio::ip::tcp::resolver::results_type endpoints;
-//};
-using NodeInfoSPtr = std::shared_ptr<NodeInfo>;
-
-class NodeAddressResolver {
- public:
-  NodeInfoSPtr resolve(uint64_t clusterID, uint64_t nodeID);
-  void addRemoteAddress(uint64_t clusterID, uint64_t nodeID, std::string address);
- private:
-};
-using NodeAddressResolverSPtr = std::shared_ptr<NodeAddressResolver>;
-
-class NodeHost;
-class RaftMessageHandler {
- public:
-  std::pair<uint64_t, uint64_t> handleMessageBatch(MessageBatchUPtr batch);
-  void handleUnreachable(uint64_t clusterID, uint64_t nodeID);
-  void handleSnapshotStatus(uint64_t clusterID, uint64_t nodeID, bool rejected);
-  void handleSnapshot(uint64_t clusterID, uint64_t nodeID, uint64_t from);
- private:
-  std::weak_ptr<NodeHost> nh_;
-};
-using RaftMessageHandlerSPtr = std::shared_ptr<RaftMessageHandler>;
+static_assert(RequestHeaderSize == sizeof(RequestHeader),
+  "RequestHeaderSize != 16");
 
 class Transport;
 class SendChannel : public std::enable_shared_from_this<SendChannel> {
@@ -80,13 +55,14 @@ class SendChannel : public std::enable_shared_from_this<SendChannel> {
     Transport *tranport,
     boost::asio::io_context &io,
     std::string source,
-    NodeInfoSPtr node,
+    NodesRecordSPtr nodeRecord,
     uint64_t queueLength);
   bool asyncSendMessage(MessageUPtr m);
   ~SendChannel();
  private:
   void sendMessage();
-  void connect();
+  void resolve();
+  void connect(boost::asio::ip::tcp::resolver::results_type endpointIter);
   slogger log;
   Transport *transport_;
   std::atomic_bool isConnected_;
@@ -94,7 +70,8 @@ class SendChannel : public std::enable_shared_from_this<SendChannel> {
   std::string sourceAddress_;
   boost::asio::io_context &io_;
   boost::asio::ip::tcp::socket socket_;
-  NodeInfoSPtr nodeInfo_;
+  boost::asio::ip::tcp::resolver resolver_;
+  NodesRecordSPtr nodeRecord_;
   BlockingConcurrentQueueSPtr<MessageUPtr> bufferQueue_;
   std::queue<MessageBatchUPtr> outputQueue_;
   std::string buffer_;
@@ -108,8 +85,14 @@ class RecvChannel : public std::enable_shared_from_this<RecvChannel> {
  public:
   explicit RecvChannel(Transport *tranport, boost::asio::io_context &io);
   boost::asio::ip::tcp::socket &socket() {return socket_;}
-  void setRequestHandlerPtr(RequestHandler handler) { requestHandler_ = std::move(handler); }
-  void setChunkHandlerPtr(ChunkHandler handler) { chunkHandler_ = std::move(handler); }
+  void setRequestHandlerPtr(RequestHandler &&handler)
+  {
+    requestHandler_ = std::move(handler);
+  }
+  void setChunkHandlerPtr(ChunkHandler &&handler)
+  {
+    chunkHandler_ = std::move(handler);
+  }
   void start();
   ~RecvChannel();
  private:

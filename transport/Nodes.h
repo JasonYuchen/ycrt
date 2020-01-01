@@ -7,8 +7,11 @@
 
 #include <functional>
 #include <unordered_map>
+#include <string>
+#include <string_view>
 #include "ycrt/Config.h"
 #include "utils/Utils.h"
+#include "pb/RaftMessage.h"
 
 namespace ycrt
 {
@@ -18,53 +21,48 @@ namespace transport
 
 class Nodes {
  public:
-  struct addr {
-    std::string network;
-    std::string address;
-    uint64_t port;
-  };
+  std::shared_ptr<Nodes> New(
+    std::function<uint64_t(uint64_t)> &&partitionIDFunc);
   struct record {
-    std::string address;
-    std::string key;
+    explicit record(const std::string &key);
+    std::string key; // getConnectionKey(address+port, clusterID)  127.0.0.1:8800-5
+    string_view address; // address + port
+    uint32_t port;
   };
-  void addRemoteAddress(uint64_t clusterID, uint64_t nodeID, std::string &address)
-  {
-    assert(clusterID != 0);
-    assert(nodeID != 0);
-    assert(!address.empty());
-    auto key = NodeInfo{clusterID, nodeID};
-    std::lock_guard<std::mutex> guard(nodesMutex_);
-    auto node = nodes_.find(key);
-    if (node == nodes_.end()) {
-      nodes_[key] = address;
-    } else if (node->second != address) {
-      log->error(
-        "inconsistent address for {0:d}:{1:d}, received {2}, expected {3}",
-        clusterID, nodeID, address, node->second);
-    }
-  }
-  record resolve(uint64_t clusterID, uint64_t nodeID)
-  {
-    assert(clusterID != 0);
-    assert(nodeID != 0);
-    auto key = NodeInfo{clusterID, nodeID};
-    addrsMutex_.lock();
-    auto addr = addrs_.find(key);
-    addrsMutex_.unlock();
-    if (addr == addrs_.end()) {
-      // FIXME
-    }
-
-    return addr->second;
-  }
+  void addRemoteAddress(
+    uint64_t clusterID, uint64_t nodeID, const std::string &address);
+  std::shared_ptr<record> resolve(uint64_t clusterID, uint64_t nodeID);
+  std::vector<NodeInfo> reverseResolve(const std::string &address);
+  void addNode(uint64_t clusterID, uint64_t nodeID, const std::string &address);
+  void removeNode(uint64_t clusterID, uint64_t nodeID);
+  void removeCluster(uint64_t clusterID);
+  void removeAllPeers();
  private:
+  Nodes();
+  std::string getConnectionKey(const std::string &address, uint64_t clusterID);
   slogger log;
   std::function<uint64_t(uint64_t)> getPartitionID_;
+  // store address specified by startCluster call
   std::mutex addrsMutex_;
-  std::unordered_map<NodeInfo, record, NodeInfoHash> addrs_;
+  std::unordered_map<NodeInfo, std::shared_ptr<record>, NodeInfoHash> addrs_;
+  // store remote nodes by exchanging messages
   std::mutex nodesMutex_;
-  std::unordered_map<NodeInfo, std::string, NodeInfoHash> nodes_;
+  std::unordered_map<NodeInfo, std::shared_ptr<record>, NodeInfoHash> nodes_;
 };
+using NodesSPtr = std::shared_ptr<Nodes>;
+using NodesRecordSPtr = std::shared_ptr<Nodes::record>;
+
+class NodeHost;
+class RaftMessageHandler {
+ public:
+  std::pair<uint64_t, uint64_t> handleMessageBatch(MessageBatchUPtr batch);
+  void handleUnreachable(uint64_t clusterID, uint64_t nodeID);
+  void handleSnapshotStatus(uint64_t clusterID, uint64_t nodeID, bool rejected);
+  void handleSnapshot(uint64_t clusterID, uint64_t nodeID, uint64_t from);
+ private:
+  std::weak_ptr<NodeHost> nh_;
+};
+using RaftMessageHandlerSPtr = std::shared_ptr<RaftMessageHandler>;
 
 } // namespace transport
 

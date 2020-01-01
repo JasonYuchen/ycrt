@@ -22,9 +22,9 @@ using boost::system::system_error;
 
 unique_ptr<Transport> Transport::New(
   NodeHostConfigSPtr nhConfig,
-  NodeAddressResolverSPtr resolver,
+  NodesSPtr resolver,
   RaftMessageHandlerSPtr handlers,
-  function<string(uint64_t, uint64_t)> snapshotDirFunc,
+  function<string(uint64_t, uint64_t)> &&snapshotDirFunc,
   uint64_t ioContexts)
 {
   unique_ptr<Transport> transport(new Transport());
@@ -53,7 +53,7 @@ Transport::Transport()
 
 bool Transport::asyncSendMessage(MessageUPtr m)
 {
-  shared_ptr<NodeInfo> node = resolver_->resolve(m->cluster_id(), m->to());
+  NodesRecordSPtr node = resolver_->resolve(m->cluster_id(), m->to());
   if (node == nullptr) {
     log->warn(
       "{0} do not have the address for {1:d}:{2:d}, dropping a message",
@@ -65,7 +65,7 @@ bool Transport::asyncSendMessage(MessageUPtr m)
     auto it = sendChannels_.find(node->key);
     if (it == sendChannels_.end()) {
       ch = make_shared<SendChannel>(
-        this, io_, sourceAddress_, node, sendQueueLength_);
+        this, nextIOContext(), sourceAddress_, node, sendQueueLength_);
       sendChannels_[node->key] = ch;
     }
   }
@@ -120,7 +120,7 @@ void Transport::start()
     });
 }
 
-void Transport::removeSendChannel(string &key)
+void Transport::removeSendChannel(const string &key)
 {
     lock_guard<mutex> guard(mutex_);
     sendChannels_.erase(key);

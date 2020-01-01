@@ -8,6 +8,7 @@
 using namespace std;
 using namespace boost::asio;
 using namespace boost::asio::chrono;
+using namespace boost::asio::ip;
 
 namespace ycrt
 {
@@ -19,7 +20,7 @@ SendChannel::SendChannel(
   Transport *tranport,
   io_context &io,
   string source,
-  NodeInfoSPtr node,
+  NodesRecordSPtr nodeRecord,
   uint64_t queueLen)
   : transport_(tranport),
     log(Log.get("transport")),
@@ -28,10 +29,11 @@ SendChannel::SendChannel(
     sourceAddress_(std::move(source)),
     io_(io),
     socket_(io),
-    nodeInfo_(std::move(node)),
+    resolver_(io),
+    nodeRecord_(std::move(nodeRecord)),
     bufferQueue_(make_shared<BlockingConcurrentQueue<MessageUPtr>>(queueLen))
 {
-  connect();
+  resolve();
 }
 
 // one channel per remote raft node,
@@ -63,7 +65,8 @@ bool SendChannel::asyncSendMessage(MessageUPtr m)
       outputQueue_.push(std::move(batch));
       // do output
       if (!inProgress) {
-        log->debug("SendChannel to {0} with next message {1}", nodeInfo_->key, outputQueue_.front()->DebugString());
+        log->debug("SendChannel to {0} with next message {1}",
+          nodeRecord_->address, outputQueue_.front()->DebugString());
         outputQueue_.front()->SerializeToString(&buffer_);
         sendMessage();
       }
@@ -92,22 +95,40 @@ void SendChannel::sendMessage()
       } else {
         // FIXME: do log, nodeInfo_->key ?
         log->warn("SendChannel to {0} closed due to async_write error {1}",
-          nodeInfo_->key, ec.message());
-        transport_->removeSendChannel(nodeInfo_->key);
+          nodeRecord_->address, ec.message());
+        transport_->removeSendChannel(nodeRecord_->key);
         socket_.close();
         // shutdown, remove this channel from sendChannels_;
       }
     });
 }
 
-void SendChannel::connect()
+void SendChannel::resolve()
+{
+  resolver_.async_resolve(
+    nodeRecord_->address.substr(0, nodeRecord_->address.find(':')), // address
+    nodeRecord_->address.substr(nodeRecord_->address.find(':') + 1),  // port
+    [this, self = shared_from_this()]
+    (error_code ec, tcp::resolver::results_type it) {
+      if (!ec) {
+        connect(it);
+      } else if (ec.value() == error::operation_aborted) {
+        return;
+      } else {
+        // do log
+      }
+    });
+}
+
+void SendChannel::connect(tcp::resolver::results_type endpointIter)
 {
   boost::asio::async_connect(
     socket_,
-    nodeInfo_->endpoints,
-    [this, self = shared_from_this()](error_code ec, ip::tcp::endpoint endpoint)
+    endpointIter,
+    [this, self = shared_from_this()](error_code ec, tcp::endpoint endpoint)
     {
-      log->debug("SendChannel connect to {0} returned {1}", endpoint.address().to_string(), ec.message());
+      log->debug("SendChannel connect to {0} returned {1}",
+        endpoint.address().to_string(), ec.message());
       if (!ec) {
         isConnected_ = true;
         if (!outputQueue_.empty()) {
@@ -119,8 +140,8 @@ void SendChannel::connect()
       } else {
         // do log
         log->warn("SendChannel to {0} closed due to async_connect error {1}",
-          nodeInfo_->key, ec.message());
-        transport_->removeSendChannel(nodeInfo_->key);
+          nodeRecord_->address, ec.message());
+        transport_->removeSendChannel(nodeRecord_->key);
         socket_.close();
         // shutdown, remove this channel from sendChannels_;
       }
@@ -200,7 +221,8 @@ void RecvChannel::readPayload()
       } else if (ec.value() == error::operation_aborted) {
         return;
       } else {
-        log->error("RecvChannel closed due to async_read error {0}", ec.message());
+        log->error("RecvChannel closed due to async_read error {0}",
+          ec.message());
         socket_.close();
       }
     });

@@ -16,6 +16,7 @@
 #include "utils/Utils.h"
 #include "settings/Hard.h"
 #include "Nodes.h"
+#include "Channel.h"
 
 namespace ycrt
 {
@@ -27,9 +28,9 @@ class Transport {
  public:
   std::unique_ptr<Transport> New(
     NodeHostConfigSPtr nhConfig,
-    NodeAddressResolverSPtr resolver,
+    NodesSPtr resolver,
     RaftMessageHandlerSPtr handlers,
-    std::function<std::string(uint64_t, uint64_t)> snapshotDirFunc,
+    std::function<std::string(uint64_t, uint64_t)> &&snapshotDirFunc,
     uint64_t ioContexts);
   //std::string name();
   //void setUnmanagedDeploymentID();
@@ -40,7 +41,7 @@ class Transport {
   //std::shared_ptr<Sink> getStreamConnection(uint64_t clusterID, uint64_t nodeID);
   void start();
   void stop() { io_.stop(); }
-  void removeSendChannel(std::string &key);
+  void removeSendChannel(const std::string &key);
  private:
   Transport();
   boost::asio::io_context &nextIOContext();
@@ -70,7 +71,7 @@ class Transport {
   // server::Context serverCtx_;
   NodeHostConfigSPtr nhConfig_;
   std::string sourceAddress_;
-  NodeAddressResolverSPtr resolver_;
+  NodesSPtr resolver_;
   RaftMessageHandlerSPtr handlers_;
 };
 
