@@ -22,10 +22,10 @@ namespace transport
 class SnapshotChunk {
  public:
   std::unique_ptr<SnapshotChunk> New(
-    std::function<void(MessageBatchUPtr)> onReceive,
-    std::function<void(uint64_t, uint64_t, uint64_t)> confirm,
-    std::function<uint64_t()> deploymentIDFunc,
-    std::function<std::string(uint64_t, uint64_t)> snapshotDirFunc);
+    std::function<void(MessageBatchUPtr)> &&onReceive,
+    std::function<void(uint64_t, uint64_t, uint64_t)> &&confirm,
+    std::function<uint64_t()> &&deploymentIDFunc,
+    std::function<std::string(uint64_t, uint64_t)> &&snapshotDirFunc);
  private:
   SnapshotChunk();
   uint64_t currentTick_;

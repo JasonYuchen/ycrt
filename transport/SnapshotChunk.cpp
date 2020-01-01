@@ -15,12 +15,12 @@ using namespace std;
 using namespace settings;
 
 unique_ptr<SnapshotChunk> SnapshotChunk::New(
-  function<void(MessageBatchUPtr)> onReceive,
-  function<void(uint64_t, uint64_t, uint64_t)> confirm,
-  function<uint64_t()> deploymentIDFunc,
-  function<string(uint64_t, uint64_t)> snapshotDirFunc)
+  function<void(MessageBatchUPtr)> &&onReceive,
+  function<void(uint64_t, uint64_t, uint64_t)> &&confirm,
+  function<uint64_t()> &&deploymentIDFunc,
+  function<string(uint64_t, uint64_t)> &&snapshotDirFunc)
 {
-  auto chunk = make_unique<SnapshotChunk>();
+  unique_ptr<SnapshotChunk> chunk(new SnapshotChunk());
   chunk->onReceive_ = std::move(onReceive);
   chunk->confirm_ = std::move(confirm);
   chunk->getDeploymentID_ = std::move(deploymentIDFunc);
