@@ -57,9 +57,11 @@ class SendChannel : public std::enable_shared_from_this<SendChannel> {
     std::string source,
     NodesRecordSPtr nodeRecord,
     uint64_t queueLength);
+  void start();
   bool asyncSendMessage(MessageUPtr m);
   ~SendChannel();
  private:
+  void asyncSendMessage();
   void sendMessage();
   void resolve();
   void connect(boost::asio::ip::tcp::resolver::results_type endpointIter);
@@ -75,6 +77,7 @@ class SendChannel : public std::enable_shared_from_this<SendChannel> {
   BlockingConcurrentQueueSPtr<MessageUPtr> bufferQueue_;
   std::queue<MessageBatchUPtr> outputQueue_;
   std::string buffer_;
+  char headerBuf_[RequestHeaderSize];
 };
 using SendChannelSPtr = std::shared_ptr<SendChannel>;
 using SendChannelUPtr = std::unique_ptr<SendChannel>;
