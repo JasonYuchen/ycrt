@@ -24,6 +24,11 @@ namespace ycrt
 namespace transport
 {
 
+// TODO: format log output
+// TODO: enable CircuitBreaker
+// TODO: asyncSendSnapshot
+// TODO: snapshot streaming
+
 class Transport {
  public:
   static std::shared_ptr<Transport> New(
