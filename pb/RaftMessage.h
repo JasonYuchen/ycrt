@@ -18,6 +18,14 @@ using SnapshotChunkSPtr = std::shared_ptr<raftpb::SnapshotChunk>;
 using SnapshotChunkUPtr = std::unique_ptr<raftpb::SnapshotChunk>;
 using SnapshotFileSPtr = std::shared_ptr<raftpb::SnapshotFile>;
 using SnapshotFileUPtr = std::unique_ptr<raftpb::SnapshotFile>;
+using StateSPtr = std::shared_ptr<raftpb::State>;
+using StateUPtr = std::unique_ptr<raftpb::State>;
+using SnapshotSPtr = std::shared_ptr<raftpb::Snapshot>;
+using SnapshotUPtr = std::unique_ptr<raftpb::Snapshot>;
+using MembershipSPtr = std::shared_ptr<raftpb::Membership>;
+using MembershipUPtr = std::unique_ptr<raftpb::Membership>;
+using EntrySPtr = std::shared_ptr<raftpb::Entry>;
+using EntryUPtr = std::unique_ptr<raftpb::Entry>;
 
 } // namespace ycrt
 

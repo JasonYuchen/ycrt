@@ -17,7 +17,7 @@ class Logger {
     static Logger logger;
     return logger;
   }
-  std::shared_ptr<spdlog::logger> get(const char *name) {
+  std::shared_ptr<spdlog::logger> GetLogger(const char *name) {
     assert(loggers_.find(name) != loggers_.end());
     return ins().loggers_[name];
   }

@@ -23,7 +23,7 @@ SendChannel::SendChannel(
   NodesRecordSPtr nodeRecord,
   uint64_t queueLen)
   : transport_(tranport),
-    log(Log.get("transport")),
+    log(Log.GetLogger("transport")),
     isConnected_(false),
     inQueue_(false),
     sourceAddress_(std::move(source)),
@@ -35,14 +35,14 @@ SendChannel::SendChannel(
 {
 }
 
-void SendChannel::start()
+void SendChannel::Start()
 {
   resolve();
 }
 
 // one channel per remote raft node,
 // asyncSendMessage of each SendChannel will only be called in one thread
-bool SendChannel::asyncSendMessage(MessageUPtr m)
+bool SendChannel::AsyncSendMessage(MessageUPtr m)
 {
   auto done = bufferQueue_->try_enqueue(std::move(m));
   if (!done) {
@@ -72,7 +72,7 @@ void SendChannel::asyncSendMessage()
     bool inProgress = !outputQueue_.empty();
     auto batch = make_unique<raftpb::MessageBatch>();
     batch->set_source_address(sourceAddress_);
-    batch->set_deployment_id(transport_->deploymentID());
+    batch->set_deployment_id(transport_->GetDeploymentID());
     // TODO: MessageBatch rpc bin ver
     for (size_t i = 0; i < count; ++i) {
       batch->mutable_requests()->AddAllocated(items[i].release());
@@ -81,10 +81,10 @@ void SendChannel::asyncSendMessage()
     // do output
     if (!inProgress) {
       log->debug("SendChannel to {0} with next message {1}",
-        nodeRecord_->address, outputQueue_.front()->DebugString());
+        nodeRecord_->Address, outputQueue_.front()->DebugString());
       outputQueue_.front()->SerializeToString(&buffer_);
       RequestHeader header{RequestType, 0, buffer_.size()};
-      header.encode(headerBuf_, RequestHeaderSize);
+      header.Encode(headerBuf_, RequestHeaderSize);
       buffer_ = std::string(headerBuf_, RequestHeaderSize) + buffer_;
       sendMessage();
     }
@@ -93,7 +93,7 @@ void SendChannel::asyncSendMessage()
 
 void SendChannel::sendMessage()
 {
-  log->debug("SendChannel send {0} bytes to {1}", buffer_.length(), nodeRecord_->address);
+  log->debug("SendChannel send {0} bytes to {1}", buffer_.length(), nodeRecord_->Address);
   boost::asio::async_write(socket_,
     buffer(buffer_.data(), buffer_.length()),
     [this, self = shared_from_this()](error_code ec, size_t length)
@@ -109,8 +109,8 @@ void SendChannel::sendMessage()
       } else {
         // FIXME: do log, nodeInfo_->key ?
         log->warn("SendChannel to {0} closed due to async_write error {1}",
-          nodeRecord_->address, ec.message());
-        transport_->removeSendChannel(nodeRecord_->key);
+          nodeRecord_->Address, ec.message());
+        transport_->RemoveSendChannel(nodeRecord_->Key);
         socket_.close();
         // shutdown, remove this channel from sendChannels_;
       }
@@ -119,7 +119,7 @@ void SendChannel::sendMessage()
 
 void SendChannel::resolve()
 {
-  resolver_.async_resolve(getEndpoint(string_view(nodeRecord_->address)),
+  resolver_.async_resolve(getEndpoint(string_view(nodeRecord_->Address)),
     [this, self = shared_from_this()]
     (error_code ec, tcp::resolver::results_type it) {
       if (!ec) {
@@ -129,8 +129,8 @@ void SendChannel::resolve()
         return;
       } else {
         log->warn("SendChannel to {0} closed due to async_resolve error {1}",
-          nodeRecord_->address, ec.message());
-        transport_->removeSendChannel(nodeRecord_->key);
+          nodeRecord_->Address, ec.message());
+        transport_->RemoveSendChannel(nodeRecord_->Key);
         socket_.close();
       }
     });
@@ -158,8 +158,8 @@ void SendChannel::connect(tcp::resolver::results_type endpointIter)
       } else {
         // do log
         log->warn("SendChannel to {0} closed due to async_connect error {1}",
-          nodeRecord_->address, ec.message());
-        transport_->removeSendChannel(nodeRecord_->key);
+          nodeRecord_->Address, ec.message());
+        transport_->RemoveSendChannel(nodeRecord_->Key);
         socket_.close();
         // shutdown, remove this channel from sendChannels_;
       }
@@ -168,13 +168,13 @@ void SendChannel::connect(tcp::resolver::results_type endpointIter)
 
 RecvChannel::RecvChannel(Transport *tranport, io_context &io)
   : transport_(tranport),
-    log(Log.get("transport")),
+    log(Log.GetLogger("transport")),
     socket_(io),
     payloadBuf_(PayloadBufSize)
 {
 }
 
-void RecvChannel::start()
+void RecvChannel::Start()
 {
   readHeader();
 }
@@ -209,22 +209,22 @@ void RecvChannel::readHeader()
 void RecvChannel::readPayload()
 {
   boost::asio::async_read(socket_,
-    buffer(payloadBuf_, header_.size),
+    buffer(payloadBuf_, header_.Size),
     [this, self = shared_from_this()](error_code ec, size_t length)
     {
       if (!ec) {
         // FIXME: check crc32
-        if (header_.method == RequestType) {
+        if (header_.Method == RequestType) {
           auto msg = make_unique<raftpb::MessageBatch>();
-          auto done = msg->ParseFromArray(payloadBuf_.data(), header_.size);
+          auto done = msg->ParseFromArray(payloadBuf_.data(), header_.Size);
           if (!done) {
             //rpc_->error();
             return;
           }
           requestHandler_(std::move(msg));
-        } else if (header_.method == SnapshotChunkType) {
+        } else if (header_.Method == SnapshotChunkType) {
           auto msg = make_unique<raftpb::SnapshotChunk>();
-          auto done = msg->ParseFromArray(payloadBuf_.data(), header_.size);
+          auto done = msg->ParseFromArray(payloadBuf_.data(), header_.Size);
           if (!done) {
             //Log.get("transport")->error();
             return;
@@ -249,17 +249,17 @@ void RecvChannel::readPayload()
 
 bool RecvChannel::decodeHeader()
 {
-  header_ = RequestHeader::decode(headerBuf_, RequestHeaderSize);
-  if (header_.method != RequestType && header_.method != SnapshotChunkType) {
+  header_ = RequestHeader::Decode(headerBuf_, RequestHeaderSize);
+  if (header_.Method != RequestType && header_.Method != SnapshotChunkType) {
     log->error("invalid method");
     return false;
   }
-  if (header_.size == 0) {
+  if (header_.Size == 0) {
     log->error("invalid payload size");
     return false;
   }
-  if (header_.size > payloadBuf_.size()) {
-    payloadBuf_.resize(header_.size);
+  if (header_.Size > payloadBuf_.size()) {
+    payloadBuf_.resize(header_.Size);
   }
   // FIXME: check crc32
   return true;

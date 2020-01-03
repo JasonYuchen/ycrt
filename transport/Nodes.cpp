@@ -36,18 +36,18 @@ shared_ptr<Nodes> Nodes::New(function<uint64_t(uint64_t)> &&partitionIDFunc)
 }
 
 Nodes::Nodes()
-  : log(Log.get("transport"))
+  : log(Log.GetLogger("transport"))
 {
 }
 
-Nodes::record::record(const std::string &key) // key = 127.0.0.1:8080-1
-  : key(key),
-    address(key.data(), key.find('-')),
-    port(std::stol(&key[key.find(':') + 1]))
+Nodes::Record::Record(const std::string &key) // key = 127.0.0.1:8080-1
+  : Key(key),
+    Address(key.data(), key.find('-')),
+    Port(std::stol(&key[key.find(':') + 1]))
 {
 }
 
-void Nodes::addRemoteAddress(
+void Nodes::AddRemoteAddress(
   uint64_t clusterID,
   uint64_t nodeID,
   const string &address) // address = ip:port
@@ -59,26 +59,26 @@ void Nodes::addRemoteAddress(
   lock_guard<mutex> guard(nodesMutex_);
   auto node = nodes_[key];
   if (node == nullptr) {
-    nodes_[key] = make_shared<record>(getConnectionKey(address, clusterID));
-  } else if (node->address != address) {
+    nodes_[key] = make_shared<Record>(getConnectionKey(address, clusterID));
+  } else if (node->Address != address) {
     log->error(
       "inconsistent address for {0:d}:{1:d}, received {2}, expected {3}",
-      clusterID, nodeID, address, node->address);
+      clusterID, nodeID, address, node->Address);
   }
 }
 
-shared_ptr<Nodes::record> Nodes::resolve(uint64_t clusterID, uint64_t nodeID)
+NodesRecordSPtr Nodes::Resolve(uint64_t clusterID, uint64_t nodeID)
 {
   assert(clusterID != 0);
   assert(nodeID != 0);
   NodeInfo key{clusterID, nodeID};
-  shared_ptr<record> addr;
+  NodesRecordSPtr addr;
   {
     lock_guard<mutex> guard(addrsMutex_);
     addr = addrs_[key];
   }
   if (addr == nullptr) {
-    shared_ptr<record> node;
+    NodesRecordSPtr node;
     {
       lock_guard<mutex> guard(nodesMutex_);
       node = nodes_[key];
@@ -95,20 +95,20 @@ shared_ptr<Nodes::record> Nodes::resolve(uint64_t clusterID, uint64_t nodeID)
   return addr;
 }
 
-vector<NodeInfo> Nodes::reverseResolve(const string &address)
+vector<NodeInfo> Nodes::ReverseResolve(const string &address)
 {
   assert(!address.empty());
   vector<NodeInfo> infos;
   lock_guard<mutex> guard(addrsMutex_);
   for (auto &addr : addrs_) {
-    if (addr.second->address == address) {
+    if (addr.second->Address == address) {
       infos.push_back(addr.first);
     }
   }
   return infos;
 }
 
-void Nodes::addNode(
+void Nodes::AddNode(
   uint64_t clusterID,
   uint64_t nodeID,
   const string &address) // url = ip:port
@@ -119,11 +119,11 @@ void Nodes::addNode(
   NodeInfo key{clusterID, nodeID};
   lock_guard<mutex> guard(addrsMutex_);
   if (addrs_.find(key) == addrs_.end()) {
-    addrs_[key] = make_shared<record>(getConnectionKey(address, clusterID));
+    addrs_[key] = make_shared<Record>(getConnectionKey(address, clusterID));
   }
 }
 
-void Nodes::removeNode(uint64_t clusterID, uint64_t nodeID)
+void Nodes::RemoveNode(uint64_t clusterID, uint64_t nodeID)
 {
   assert(clusterID != 0);
   assert(nodeID != 0);
@@ -132,7 +132,7 @@ void Nodes::removeNode(uint64_t clusterID, uint64_t nodeID)
   addrs_.erase(key);
 }
 
-void Nodes::removeCluster(uint64_t clusterID) // set the sp to nullptr indicating the removal
+void Nodes::RemoveCluster(uint64_t clusterID) // set the sp to nullptr indicating the removal
 {
   assert(clusterID != 0);
   lock_guard<mutex> guard(addrsMutex_);
@@ -143,7 +143,7 @@ void Nodes::removeCluster(uint64_t clusterID) // set the sp to nullptr indicatin
   }
 }
 
-void Nodes::removeAllPeers()
+void Nodes::RemoveAllPeers()
 {
   lock_guard<mutex> guard(addrsMutex_);
   addrs_.clear();

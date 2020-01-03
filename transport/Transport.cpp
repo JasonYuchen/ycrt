@@ -20,14 +20,14 @@ using namespace boost::asio;
 using boost::system::error_code;
 using boost::system::system_error;
 
-shared_ptr<Transport> Transport::New(
+TransportSPtr Transport::New(
   NodeHostConfigSPtr nhConfig,
   NodesSPtr resolver,
   RaftMessageHandlerSPtr handlers,
   function<string(uint64_t, uint64_t)> &&snapshotDirFunc,
   uint64_t ioContexts)
 {
-  shared_ptr<Transport> transport(new Transport(std::move(nhConfig)));
+  TransportSPtr transport(new Transport(std::move(nhConfig)));
   transport->resolver_ = std::move(resolver);
   transport->handlers_ = std::move(handlers);
   for (size_t i = 0; i < ioContexts; ++i) {
@@ -37,7 +37,7 @@ shared_ptr<Transport> Transport::New(
 }
 
 Transport::Transport(NodeHostConfigSPtr nhConfig)
-  : log(Log.get("transport")),
+  : log(Log.GetLogger("transport")),
     nhConfig_(std::move(nhConfig)),
     io_(1),
     worker_(io_),
@@ -60,9 +60,9 @@ Transport::Transport(NodeHostConfigSPtr nhConfig)
   log->info("start listening on {0}", nhConfig_->ListenAddress);
 }
 
-bool Transport::asyncSendMessage(MessageUPtr m)
+bool Transport::AsyncSendMessage(MessageUPtr m)
 {
-  NodesRecordSPtr node = resolver_->resolve(m->cluster_id(), m->to());
+  NodesRecordSPtr node = resolver_->Resolve(m->cluster_id(), m->to());
   if (node == nullptr) {
     log->warn(
       "{0} do not have the address for {1:d}:{2:d}, dropping a message",
@@ -72,19 +72,19 @@ bool Transport::asyncSendMessage(MessageUPtr m)
   SendChannelSPtr ch;
   {
     lock_guard<mutex> guard(mutex_);
-    auto it = sendChannels_.find(node->key);
+    auto it = sendChannels_.find(node->Key);
     if (it == sendChannels_.end()) {
       ch = make_shared<SendChannel>(
         this, nextIOContext(), sourceAddress_, node, sendQueueLength_);
-      sendChannels_[node->key] = ch;
-      ch->start();
+      sendChannels_[node->Key] = ch;
+      ch->Start();
     }
   }
-  ch->asyncSendMessage(std::move(m));
+  ch->AsyncSendMessage(std::move(m));
   return true;
 }
 
-void Transport::start()
+void Transport::Start()
 {
   auto conn = make_shared<RecvChannel>(this, nextIOContext());
   acceptor_.async_accept(
@@ -92,7 +92,7 @@ void Transport::start()
     [conn, this](const error_code &ec) mutable {
       if (!ec) {
         log->info("new connection received from {0}", conn->socket().remote_endpoint().address().to_string());
-        conn->setRequestHandlerPtr(
+        conn->SetRequestHandlerPtr(
           [this](MessageBatchUPtr m)
           {
             if (m->deployment_id() != deploymentID_) {
@@ -108,7 +108,7 @@ void Transport::start()
                 if (req.from() != 0) {
                   log->info("new remote address learnt: {0:d}:{1:d} in {2}",
                     req.cluster_id(), req.from(), addr);
-                  resolver_->addRemoteAddress(
+                  resolver_->AddRemoteAddress(
                     req.cluster_id(), req.from(), addr);
                 }
               }
@@ -116,23 +116,23 @@ void Transport::start()
             handlers_->handleMessageBatch(std::move(m));
             // TODO: metrics
           });
-        conn->setChunkHandlerPtr(
+        conn->SetChunkHandlerPtr(
           [this](SnapshotChunkUPtr m)
           {
             // TODO
             log->warn("snapshot chunk not supported currently");
           });
-        conn->start();
+        conn->Start();
       } else if (ec.value() == error::operation_aborted) {
         return;
       } else {
         log->warn("async_accept error {0}", ec.message());
       }
-      start();
+      Start();
     });
 }
 
-void Transport::stop()
+void Transport::Stop()
 {
   if (!stopped_.exchange(true)) {
     {
@@ -145,7 +145,7 @@ void Transport::stop()
   }
 }
 
-void Transport::removeSendChannel(const string &key)
+void Transport::RemoveSendChannel(const string &key)
 {
     lock_guard<mutex> guard(mutex_);
     sendChannels_.erase(key);
@@ -154,7 +154,7 @@ void Transport::removeSendChannel(const string &key)
 Transport::~Transport()
 {
   if (!stopped_) {
-    stop();
+    Stop();
   }
 }
 

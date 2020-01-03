@@ -26,21 +26,21 @@ constexpr uint32_t RequestType = 100;
 constexpr uint32_t SnapshotChunkType = 200;
 
 struct RequestHeader {
-  uint32_t method;
-  uint32_t crc32;
-  uint64_t size;
+  uint32_t Method;
+  uint32_t CRC32;
+  uint64_t Size;
   // FIXME
-  void encode(char *buf, size_t len) {
-    ::memcpy(&buf[0], &method, 4);
-    ::memcpy(&buf[4], &crc32, 4);
-    ::memcpy(&buf[8], &size, 8);
+  void Encode(char *buf, size_t len) {
+    ::memcpy(&buf[0], &Method, 4);
+    ::memcpy(&buf[4], &CRC32, 4);
+    ::memcpy(&buf[8], &Size, 8);
   }
   // FIXME
-  static RequestHeader decode(const char *buf, size_t len) {
+  static RequestHeader Decode(const char *buf, size_t len) {
     RequestHeader header{};
-    ::memcpy(&header.method, &buf[0], 4);
-    ::memcpy(&header.crc32, &buf[4], 4);
-    ::memcpy(&header.size, &buf[8], 8);
+    ::memcpy(&header.Method, &buf[0], 4);
+    ::memcpy(&header.CRC32, &buf[4], 4);
+    ::memcpy(&header.Size, &buf[8], 8);
     return header;
   }
 };
@@ -57,8 +57,8 @@ class SendChannel : public std::enable_shared_from_this<SendChannel> {
     std::string source,
     NodesRecordSPtr nodeRecord,
     uint64_t queueLength);
-  void start();
-  bool asyncSendMessage(MessageUPtr m);
+  void Start();
+  bool AsyncSendMessage(MessageUPtr m);
   ~SendChannel();
  private:
   void asyncSendMessage();
@@ -88,15 +88,15 @@ class RecvChannel : public std::enable_shared_from_this<RecvChannel> {
  public:
   explicit RecvChannel(Transport *tranport, boost::asio::io_context &io);
   boost::asio::ip::tcp::socket &socket() {return socket_;}
-  void setRequestHandlerPtr(RequestHandler &&handler)
+  void SetRequestHandlerPtr(RequestHandler &&handler)
   {
     requestHandler_ = std::move(handler);
   }
-  void setChunkHandlerPtr(ChunkHandler &&handler)
+  void SetChunkHandlerPtr(ChunkHandler &&handler)
   {
     chunkHandler_ = std::move(handler);
   }
-  void start();
+  void Start();
   ~RecvChannel();
  private:
   void readHeader();

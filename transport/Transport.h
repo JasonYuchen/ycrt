@@ -39,15 +39,15 @@ class Transport {
     uint64_t ioContexts);
   //std::string name();
   //void setUnmanagedDeploymentID();
-  void setDeploymentID(uint64_t id) { deploymentID_ = id; }
-  uint64_t deploymentID() { return deploymentID_; }
+  void SetDeploymentID(uint64_t id) { deploymentID_ = id; }
+  uint64_t GetDeploymentID() { return deploymentID_; }
 
-  bool asyncSendMessage(MessageUPtr m);
-  //bool asyncSendSnapshot(MessageUPtr m);
-  //std::shared_ptr<Sink> getStreamConnection(uint64_t clusterID, uint64_t nodeID);
-  void start();
-  void stop();
-  void removeSendChannel(const std::string &key);
+  bool AsyncSendMessage(MessageUPtr m);
+  //bool AsyncSendSnapshot(MessageUPtr m);
+  //std::shared_ptr<Sink> GetStreamConnection(uint64_t clusterID, uint64_t nodeID);
+  void Start();
+  void Stop();
+  void RemoveSendChannel(const std::string &key);
   ~Transport();
  private:
   Transport(NodeHostConfigSPtr);
@@ -85,6 +85,7 @@ class Transport {
   NodesSPtr resolver_;
   RaftMessageHandlerSPtr handlers_;
 };
+using TransportSPtr = std::shared_ptr<Transport>;
 
 } // namespace transport
 

@@ -153,7 +153,7 @@ struct Config {
   // Quiesce support is currently experimental.
   bool Quiesce;
 
-  void validate();
+  void Validate();
 };
 using ConfigSPtr = std::shared_ptr<Config>;
 
@@ -254,7 +254,7 @@ struct NodeHostConfig {
   // The default value 0 means there is no limit for receiving snapshot data.
   uint64_t MaxSnapshotRecvBytesPerSecond;
 
-  void validate();
+  void Validate();
 };
 using NodeHostConfigSPtr = std::shared_ptr<NodeHostConfig>;
 
