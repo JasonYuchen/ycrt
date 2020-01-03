@@ -29,7 +29,6 @@ TEST(Transport, Client)
   nhConfig2->RaftAddress = "127.0.0.1:9090";
   nhConfig2->ListenAddress = "127.0.0.1:9090";
   auto resolver2 = Nodes::New([](uint64_t){return 0;});
-  resolver2->addNode(1, 1, "127.0.0.1:9009");
   auto transport2 = Transport::New(nhConfig2, resolver2, handler, [](uint64_t,uint64_t){return "no";}, 1);
   transport2->start();
   Log.get("transport")->info("test start");
@@ -39,11 +38,8 @@ TEST(Transport, Client)
   msg->set_to(2);
   msg->set_from(1);
   transport1->asyncSendMessage(std::move(msg));
-
-  int i;
   std::this_thread::sleep_for(std::chrono::milliseconds(1000));
   Log.get("transport")->flush();
-  //cin >> i;
   transport1->stop();
   transport2->stop();
   transport2.reset();

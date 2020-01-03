@@ -106,6 +106,8 @@ void Transport::start()
             if (!addr.empty()) {
               for (auto &req : m->requests()) {
                 if (req.from() != 0) {
+                  log->info("new remote address learnt: {0:d}:{1:d} in {2}",
+                    req.cluster_id(), req.from(), addr);
                   resolver_->addRemoteAddress(
                     req.cluster_id(), req.from(), addr);
                 }
