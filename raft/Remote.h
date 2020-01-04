@@ -13,8 +13,7 @@ namespace ycrt
 namespace raft
 {
 
-class Remote {
- public:
+struct Remote {
   enum State : uint8_t {
     Retry = 0, Wait, Replicate, Snapshot, NumOfState
   };
@@ -30,18 +29,17 @@ class Remote {
   bool DecreaseTo(uint64_t rejected, uint64_t last);
   bool IsPaused();
   bool IsActive();
-  void SetActive(bool isActive);
   void RetryToWait();
   void WaitToRetry();
- private:
-  bool active_;
-  State state_;
-  uint64_t match_;
-  uint64_t next_;
-  uint64_t snapshotIndex_;
+
+  bool Active = false;
+  enum State State = Retry;
+  uint64_t Match = 0;
+  uint64_t Next = 0;
+  uint64_t SnapshotIndex = 0;
 };
 
-const char *StateToString(Remote::State state);
+const char *StateToString(enum Remote::State state);
 
 } // namespace raft
 
