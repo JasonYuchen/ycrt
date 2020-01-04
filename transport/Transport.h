@@ -42,7 +42,7 @@ class Transport {
   void SetDeploymentID(uint64_t id) { deploymentID_ = id; }
   uint64_t GetDeploymentID() { return deploymentID_; }
 
-  bool AsyncSendMessage(MessageUPtr m);
+  bool AsyncSendMessage(pbMessageSPtr m);
   //bool AsyncSendSnapshot(MessageUPtr m);
   //std::shared_ptr<Sink> GetStreamConnection(uint64_t clusterID, uint64_t nodeID);
   void Start();

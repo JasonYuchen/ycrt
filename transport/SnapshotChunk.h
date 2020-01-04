@@ -22,7 +22,7 @@ namespace transport
 class SnapshotChunk {
  public:
   std::unique_ptr<SnapshotChunk> New(
-    std::function<void(MessageBatchUPtr)> &&onReceive,
+    std::function<void(pbMessageBatchUPtr)> &&onReceive,
     std::function<void(uint64_t, uint64_t, uint64_t)> &&confirm,
     std::function<uint64_t()> &&deploymentIDFunc,
     std::function<std::string(uint64_t, uint64_t)> &&snapshotDirFunc);
@@ -31,12 +31,12 @@ class SnapshotChunk {
   uint64_t currentTick_;
   bool validate_;
   std::function<std::string(uint64_t, uint64_t)> getSnapshotDir_;
-  std::function<void(MessageBatchUPtr)> onReceive_;
+  std::function<void(pbMessageBatchUPtr)> onReceive_;
   std::function<void(uint64_t, uint64_t, uint64_t)> confirm_;
   std::function<uint64_t()> getDeploymentID_;
   struct track {
-    SnapshotChunkUPtr firstChunk;
-    std::vector<SnapshotFileUPtr> extraFiles;
+    pbSnapshotChunkSPtr firstChunk;
+    std::vector<pbSnapshotFileSPtr> extraFiles;
     // validator
     uint64_t nextChunk;
     uint64_t tick;

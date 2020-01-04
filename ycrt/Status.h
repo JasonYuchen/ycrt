@@ -2,21 +2,15 @@
 // Created by jason on 2019/12/24.
 //
 
-#ifndef YCRT_UTILS_ERROR_H_
-#define YCRT_UTILS_ERROR_H_
+#ifndef YCRT_YCRT_STATUS_H_
+#define YCRT_YCRT_STATUS_H_
 
 #include <string>
 #include <stdexcept>
+#include "utils/Error.h"
 
 namespace ycrt
 {
-
-enum ErrorCode : int32_t {
-  OK = 0,
-  errInvalidConfig = 1,
-  errBatchSendSkipped = 2,
-  errChunkSendSkipped = 3,
-};
 
 class Status {
  public:
@@ -43,4 +37,4 @@ inline bool operator==(const Status &err, const ErrorCode &code)
 
 } // namespace ycrt
 
-#endif //YCRT_UTILS_ERROR_H_
+#endif //YCRT_YCRT_STATUS_H_

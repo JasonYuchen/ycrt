@@ -10,22 +10,33 @@
 namespace ycrt
 {
 
-using MessageBatchSPtr = std::shared_ptr<raftpb::MessageBatch>;
-using MessageBatchUPtr = std::unique_ptr<raftpb::MessageBatch>;
-using MessageSPtr = std::shared_ptr<raftpb::Message>;
-using MessageUPtr = std::unique_ptr<raftpb::Message>;
-using SnapshotChunkSPtr = std::shared_ptr<raftpb::SnapshotChunk>;
-using SnapshotChunkUPtr = std::unique_ptr<raftpb::SnapshotChunk>;
-using SnapshotFileSPtr = std::shared_ptr<raftpb::SnapshotFile>;
-using SnapshotFileUPtr = std::unique_ptr<raftpb::SnapshotFile>;
-using StateSPtr = std::shared_ptr<raftpb::State>;
-using StateUPtr = std::unique_ptr<raftpb::State>;
-using SnapshotSPtr = std::shared_ptr<raftpb::Snapshot>;
-using SnapshotUPtr = std::unique_ptr<raftpb::Snapshot>;
-using MembershipSPtr = std::shared_ptr<raftpb::Membership>;
-using MembershipUPtr = std::unique_ptr<raftpb::Membership>;
-using EntrySPtr = std::shared_ptr<raftpb::Entry>;
-using EntryUPtr = std::unique_ptr<raftpb::Entry>;
+using pbMessageType = raftpb::MessageType;
+using pbMessageBatch = raftpb::MessageBatch;
+using pbMessageBatchSPtr = std::shared_ptr<raftpb::MessageBatch>;
+using pbMessageBatchUPtr = std::unique_ptr<raftpb::MessageBatch>;
+using pbMessage = raftpb::Message;
+using pbMessageSPtr = std::shared_ptr<raftpb::Message>;
+using pbMessageUPtr = std::unique_ptr<raftpb::Message>;
+using pbSnapshotChunk = raftpb::SnapshotChunk;
+using pbSnapshotChunkSPtr = std::shared_ptr<raftpb::SnapshotChunk>;
+using pbSnapshotChunkUPtr = std::unique_ptr<raftpb::SnapshotChunk>;
+using pbSnapshotFile = raftpb::SnapshotFile;
+using pbSnapshotFileSPtr = std::shared_ptr<raftpb::SnapshotFile>;
+using pbSnapshotFileUPtr = std::unique_ptr<raftpb::SnapshotFile>;
+using pbState = raftpb::State;
+using pbStateSPtr = std::shared_ptr<raftpb::State>;
+using pbStateUPtr = std::unique_ptr<raftpb::State>;
+using pbSnapshot = raftpb::Snapshot;
+using pbSnapshotSPtr = std::shared_ptr<raftpb::Snapshot>;
+using pbSnapshotUPtr = std::unique_ptr<raftpb::Snapshot>;
+using pbMembership = raftpb::Membership;
+using pbMembershipSPtr = std::shared_ptr<raftpb::Membership>;
+using pbMembershipUPtr = std::unique_ptr<raftpb::Membership>;
+using pbEntry = raftpb::Entry;
+using pbEntrySPtr = std::shared_ptr<raftpb::Entry>;
+using pbEntryUPtr = std::unique_ptr<raftpb::Entry>;
+
+constexpr uint8_t NumOfMessageType = 28;
 
 } // namespace ycrt
 

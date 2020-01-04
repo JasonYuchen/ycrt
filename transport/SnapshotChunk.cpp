@@ -15,7 +15,7 @@ using namespace std;
 using namespace settings;
 
 unique_ptr<SnapshotChunk> SnapshotChunk::New(
-  function<void(MessageBatchUPtr)> &&onReceive,
+  function<void(pbMessageBatchUPtr)> &&onReceive,
   function<void(uint64_t, uint64_t, uint64_t)> &&confirm,
   function<uint64_t()> &&deploymentIDFunc,
   function<string(uint64_t, uint64_t)> &&snapshotDirFunc)

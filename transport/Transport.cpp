@@ -60,7 +60,7 @@ Transport::Transport(NodeHostConfigSPtr nhConfig)
   log->info("start listening on {0}", nhConfig_->ListenAddress);
 }
 
-bool Transport::AsyncSendMessage(MessageUPtr m)
+bool Transport::AsyncSendMessage(pbMessageSPtr m)
 {
   NodesRecordSPtr node = resolver_->Resolve(m->cluster_id(), m->to());
   if (node == nullptr) {
@@ -93,7 +93,7 @@ void Transport::Start()
       if (!ec) {
         log->info("new connection received from {0}", conn->socket().remote_endpoint().address().to_string());
         conn->SetRequestHandlerPtr(
-          [this](MessageBatchUPtr m)
+          [this](pbMessageBatchUPtr m)
           {
             if (m->deployment_id() != deploymentID_) {
               log->warn("deployment id does not match,"
@@ -117,7 +117,7 @@ void Transport::Start()
             // TODO: metrics
           });
         conn->SetChunkHandlerPtr(
-          [this](SnapshotChunkUPtr m)
+          [this](pbSnapshotChunkSPtr m)
           {
             // TODO
             log->warn("snapshot chunk not supported currently");

@@ -59,7 +59,7 @@ using NodesRecordSPtr = std::shared_ptr<Nodes::Record>;
 class NodeHost;
 class RaftMessageHandler {
  public:
-  std::pair<uint64_t, uint64_t> handleMessageBatch(MessageBatchUPtr batch)
+  std::pair<uint64_t, uint64_t> handleMessageBatch(pbMessageBatchUPtr batch)
   {
     Log.GetLogger("transport")->info("handleMessageBatch received: {0}", batch->DebugString());
     return {0, 0};

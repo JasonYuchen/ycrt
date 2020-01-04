@@ -58,7 +58,7 @@ class SendChannel : public std::enable_shared_from_this<SendChannel> {
     NodesRecordSPtr nodeRecord,
     uint64_t queueLength);
   void Start();
-  bool AsyncSendMessage(MessageUPtr m);
+  bool AsyncSendMessage(pbMessageSPtr m);
   ~SendChannel();
  private:
   void asyncSendMessage();
@@ -74,16 +74,16 @@ class SendChannel : public std::enable_shared_from_this<SendChannel> {
   boost::asio::ip::tcp::socket socket_;
   boost::asio::ip::tcp::resolver resolver_;
   NodesRecordSPtr nodeRecord_;
-  BlockingConcurrentQueueSPtr<MessageUPtr> bufferQueue_;
-  std::queue<MessageBatchUPtr> outputQueue_;
+  BlockingConcurrentQueueSPtr<pbMessageSPtr> bufferQueue_;
+  std::queue<pbMessageBatchUPtr> outputQueue_;
   std::string buffer_;
   char headerBuf_[RequestHeaderSize];
 };
 using SendChannelSPtr = std::shared_ptr<SendChannel>;
 using SendChannelUPtr = std::unique_ptr<SendChannel>;
 
-using RequestHandler = std::function<void(MessageBatchUPtr)>;
-using ChunkHandler = std::function<void(SnapshotChunkUPtr)>;
+using RequestHandler = std::function<void(pbMessageBatchUPtr)>;
+using ChunkHandler = std::function<void(pbSnapshotChunkUPtr)>;
 class RecvChannel : public std::enable_shared_from_this<RecvChannel> {
  public:
   explicit RecvChannel(Transport *tranport, boost::asio::io_context &io);
