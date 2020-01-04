@@ -75,7 +75,7 @@ void SendChannel::asyncSendMessage()
     batch->set_deployment_id(transport_->GetDeploymentID());
     // TODO: MessageBatch rpc bin ver
     for (size_t i = 0; i < count; ++i) {
-      // TODO: use customized serialization
+      // TODO: use customized serialization, not thread-safe to use move here !!!
       batch->mutable_requests()->Add(std::move(*items[i]));
     }
     outputQueue_.push(std::move(batch));

@@ -2,7 +2,7 @@
 
 Yet another Raft-based consensus library in modern C++.
 
-Deeply inspired by dragonboat.
+Deeply inspired by dragonboat. (could be considered as a C++ version of dragonboat)
 
 ## dependencies
 
