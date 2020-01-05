@@ -9,7 +9,7 @@
 
 namespace ycrt
 {
-
+// TODO: use hand-written serialization
 using pbMessageType = raftpb::MessageType;
 using pbMessageBatch = raftpb::MessageBatch;
 using pbMessageBatchSPtr = std::shared_ptr<raftpb::MessageBatch>;
