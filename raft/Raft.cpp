@@ -2,8 +2,9 @@
 // Created by jason on 2020/1/2.
 //
 
+#include <random>
 #include "Raft.h"
-#include "assert.h"
+#include <assert.h>
 #include "utils/Error.h"
 #include "settings/Soft.h"
 
@@ -44,9 +45,9 @@ Raft::Raft(ConfigSPtr &config, LogDBSPtr &logdb)
     matched_(),
     logEntry_(new LogEntry(logdb)),
     //readIndex_(),
-    //readyToRead_(),
+    readyToRead_(),
     droppedEntries_(),
-    //droppedReadIndexes_,
+    droppedReadIndexes_(),
     quiesce_(false),
     checkQuorum_(config->CheckQuorum),
     tickCount_(0),
@@ -55,9 +56,10 @@ Raft::Raft(ConfigSPtr &config, LogDBSPtr &logdb)
     electionTimeout_(config->ElectionRTT),
     heartbeatTimeout_(config->HeartbeatRTT),
     randomizedElectionTimeout_(0),
-    handlers_(),
     maxEntrySize_(settings::Soft::ins().MaxEntrySize),
-    inMemoryGCTimeout_(settings::Soft::ins().InMemGCTimeout)
+    inMemoryGCTimeout_(settings::Soft::ins().InMemGCTimeout),
+    randomEngine_(chrono::system_clock::now().time_since_epoch().count()),
+    handlers_(),
 {
   pair<pbStateSPtr, pbMembershipSPtr> nodeState = logdb->NodeState();
   for (auto &node : nodeState.second->addresses()) {
@@ -437,6 +439,12 @@ bool Raft::timeForAbortLeaderTransfer()
 bool Raft::timeForInMemoryGC()
 {
   return tickCount_ % inMemoryGCTimeout_ == 0;
+}
+
+void Raft::setRandomizedElectionTimeout()
+{
+  randomizedElectionTimeout_ =
+    electionTimeout_ + randomEngine_() % electionTimeout_;
 }
 
 } // namespace raft

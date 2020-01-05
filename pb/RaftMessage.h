@@ -36,6 +36,16 @@ using pbEntry = raftpb::Entry;
 using pbEntrySPtr = std::shared_ptr<raftpb::Entry>;
 using pbEntryUPtr = std::unique_ptr<raftpb::Entry>;
 
+typedef struct SystemCtx {
+  uint64_t Low;
+  uint64_t High;
+} pbSystemCtx;
+
+typedef struct ReadyToRead {
+  uint64_t Index;
+  struct SystemCtx SystemCtx;
+} pbReadyToRead;
+
 constexpr uint8_t NumOfMessageType = 28;
 
 } // namespace ycrt

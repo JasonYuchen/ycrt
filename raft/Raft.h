@@ -10,6 +10,7 @@
 #include <assert.h>
 #include <unordered_map>
 #include <functional>
+#include <random>
 
 #include "utils/Utils.h"
 #include "Remote.h"
@@ -84,7 +85,7 @@ class Raft {
   void send(pbMessage &m);
   void sendReplicateMessage(uint64_t to);
   void broadcastReplicateMessage();
-  void sendHeartbeatMessage(uint64_t to /*, pbSystemCtx hint*/, uint64_t match);
+  void sendHeartbeatMessage(uint64_t to ,pbSystemCtx hint, uint64_t match);
   void broadcastHeartbeatMessage();
   void broadcastHeartbeatMessage(/*pbSystemCtx hint*/uint64_t hint);
   void sendTimeoutNowMessage(uint64_t to);
@@ -221,9 +222,9 @@ class Raft {
   std::vector<uint64_t> matched_;
   LogEntrySPtr logEntry_;
   // ReadIndexSPtr readIndex_;
-  // std::vector<ReadyToReadSPtr> readyToRead_;
+  std::vector<pbReadyToRead> readyToRead_;
   std::vector<pbEntrySPtr> droppedEntries_;
-  // pbSystemCtxSPtr droppedReadIndexes_;
+  std::vector<pbSystemCtx> droppedReadIndexes_;
   bool quiesce_;
   bool checkQuorum_;
   uint64_t tickCount_;
@@ -234,6 +235,7 @@ class Raft {
   uint64_t randomizedElectionTimeout_;
   uint64_t maxEntrySize_;
   uint64_t inMemoryGCTimeout_;
+  std::mt19937_64 randomEngine_;
   using MessageHandler = void(Raft::*)(pbMessage &m);
   MessageHandler handlers_[NumOfState][NumOfMessageType];
 };
