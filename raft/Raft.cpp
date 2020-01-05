@@ -3,8 +3,9 @@
 //
 
 #include "Raft.h"
-
 #include "assert.h"
+#include "utils/Error.h"
+#include "settings/Soft.h"
 
 namespace ycrt
 {
@@ -14,7 +15,7 @@ namespace raft
 
 using namespace std;
 
-const char *StateToString(Raft::State state)
+const char *StateToString(enum Raft::State state)
 {
   static const char *states[] =
     {"Follower", "PreCandidate", "Candidate", "Leader", "Observer", "Witness"};
@@ -26,6 +27,7 @@ Raft::Raft(ConfigSPtr &config, LogDBSPtr &logdb)
   : log(Log.GetLogger("raft")),
     clusterID_(config->ClusterID),
     nodeID_(config->NodeID),
+    cn_(fmt::format("[{0:05d}:{1:05d}]", clusterID_, nodeID_)),
     leaderID_(NoLeader),
     leaderTransferTargetID_(NoLeader),
     isLeaderTransfer_(false),
@@ -40,7 +42,7 @@ Raft::Raft(ConfigSPtr &config, LogDBSPtr &logdb)
     witnesses_(),
     messages_(),
     matched_(),
-    log_(new LogEntry(logdb)),
+    logEntry_(new LogEntry(logdb)),
     //readIndex_(),
     //readyToRead_(),
     droppedEntries_(),
@@ -53,9 +55,11 @@ Raft::Raft(ConfigSPtr &config, LogDBSPtr &logdb)
     electionTimeout_(config->ElectionRTT),
     heartbeatTimeout_(config->HeartbeatRTT),
     randomizedElectionTimeout_(0),
-    handlers_()
+    handlers_(),
+    maxEntrySize_(settings::Soft::ins().MaxEntrySize),
+    inMemoryGCTimeout_(settings::Soft::ins().InMemGCTimeout)
 {
-  pair<pbStateSPtr, pbMembershipSPtr> nodeState = logdb->GetNodeState();
+  pair<pbStateSPtr, pbMembershipSPtr> nodeState = logdb->NodeState();
   for (auto &node : nodeState.second->addresses()) {
     remotes_.insert({node.first, Remote{.Next = 1}});
   }
@@ -79,7 +83,6 @@ Raft::Raft(ConfigSPtr &config, LogDBSPtr &logdb)
     becomeFollower(term_, NoLeader);
   }
   initializeHandlerMap();
-  checkHandlerMapOrThrow();
 }
 
 Raft::Status Raft::GetLocalStatus()
@@ -92,13 +95,45 @@ Raft::Status Raft::GetLocalStatus()
     .NodeState = state_};
 }
 
-void Raft::Handle(pbMessageSPtr &m)
+void Raft::Handle(pbMessageSPtr &&m)
 {
-  if (!onMessageTermNotMatched(m)) {
+  assert(m);
+  if (!onMessageTermNotMatched(*m)) {
     assert(m->term() == 0 || m->term() == term_);
-    (this->*handlers_[state_][m->type()])(m);
+    (this->*handlers_[state_][m->type()])(*m);
   } else {
     log->info("dropped a {0} from {1}, term not matched", m->type(), m->from());
+  }
+}
+
+void Raft::Handle(pbMessageSPtr &m)
+{
+  assert(m);
+  if (!onMessageTermNotMatched(*m)) {
+    assert(m->term() == 0 || m->term() == term_);
+    (this->*handlers_[state_][m->type()])(*m);
+  } else {
+    log->info("dropped a {0} from {1}, term not matched", m->type(), m->from());
+  }
+}
+
+void Raft::Handle(pbMessage &m)
+{
+  if (!onMessageTermNotMatched(m)) {
+    assert(m.term() == 0 || m.term() == term_);
+    (this->*handlers_[state_][m.type()])(m);
+  } else {
+    log->info("dropped a {0} from {1}, term not matched", m.type(), m.from());
+  }
+}
+
+void Raft::Handle(pbMessage &&m)
+{
+  if (!onMessageTermNotMatched(m)) {
+    assert(m.term() == 0 || m.term() == term_);
+    (this->*handlers_[state_][m.type()])(m);
+  } else {
+    log->info("dropped a {0} from {1}, term not matched", m.type(), m.from());
   }
 }
 
@@ -171,6 +206,238 @@ void Raft::initializeHandlerMap()
   handlers_[Witness][raftpb::SnapshotReceived] = &Raft::handleRestoreRemote;
 }
 
+string Raft::describe()
+{
+  uint64_t lastIndex = logEntry_->LastIndex();
+  StatusWith<uint64_t> term_s = logEntry_->Term(lastIndex);
+  if (!term_s.IsOK() && term_s.Code() != errLogCompacted) {
+    log->critical("{0} failed to get term with index={1}", cn_, lastIndex);
+    term_s.IsOKOrThrow();
+  }
+  return fmt::format(
+    "[first={0},last={1},term={2},commit={3},applied={4}] {5} with term {6}",
+    logEntry_->FirstIndex(), lastIndex, term_s.GetOrDefault(0),
+    logEntry_->Committed(), logEntry_->Processed(), cn_, term_);
+}
+
+void Raft::loadState(const pbStateSPtr &state)
+{
+  if (state->commit() < logEntry_->Committed()
+    || state->commit() > logEntry_->LastIndex()) {
+    log->critical("loadState: state out of range, commit={0}, range=[{1},{2}]",
+      state->commit(), logEntry_->Committed(), logEntry_->LastIndex());
+    throw Error(errOutOfRange, "state out of range");
+  }
+  logEntry_->SetCommitted(state->commit());
+  term_ = state->term();
+  vote_ = state->vote();
+}
+
+bool Raft::isFollower()
+{
+  return state_ == Follower;
+}
+
+bool Raft::isPreCandidate()
+{
+  return state_ == PreCandidate;
+}
+
+bool Raft::isCandidate()
+{
+  return state_ == Candidate;
+}
+
+bool Raft::isLeader()
+{
+  return state_ == Leader;
+}
+
+bool Raft::isObserver()
+{
+  return state_ == Observer;
+}
+
+bool Raft::isWitness()
+{
+  return state_ == Witness;
+}
+
+void Raft::mustBeOrThrow(State state)
+{
+  if (state_ != state) {
+    log->critical("{0} is not a {1}", describe(), StateToString(state));
+    throw Error(errUnexpectedRaftState);
+  }
+}
+
+void Raft::mustNotBeOrThrow(State state)
+{
+  if (state_ == state) {
+    log->critical("{0} is a {1}", describe(), StateToString(state));
+    throw Error(errUnexpectedRaftState);
+  }
+}
+
+uint64_t Raft::quorum()
+{
+  return numVotingMembers()/2 + 1;
+}
+
+uint64_t Raft::numVotingMembers()
+{
+  return remotes_.size() + witnesses_.size();
+}
+
+void Raft::resetMatchValueArray()
+{
+  matched_ = vector<uint64_t>(numVotingMembers(), 0);
+}
+
+bool Raft::isSingleNodeQuorum()
+{
+  return quorum() == 1;
+}
+
+bool Raft::leaderHasQuorum()
+{
+  uint64_t count = 0;
+  for (auto &node : getVotingMembers()) {
+    if (node.first == nodeID_ || node.second.IsActive()) {
+      count++;
+      node.second.SetActive(false);
+    }
+  }
+  return count >= quorum();
+}
+
+vector<uint64_t> Raft::getNodes()
+{
+  vector<uint64_t> nodes;
+  nodes.reserve(remotes_.size()+observers_.size()+witnesses_.size());
+  for(auto &i : remotes_) {
+    nodes.emplace_back(i.first);
+  }
+  for(auto &i : observers_) {
+    nodes.emplace_back(i.first);
+  }
+  for(auto &i : witnesses_) {
+    nodes.emplace_back(i.first);
+  }
+  return nodes;
+}
+
+vector<uint64_t> Raft::getSortedNodes()
+{
+  auto nodes = getNodes();
+  std::sort(nodes.begin(), nodes.end());
+  return nodes;
+}
+
+unordered_map<uint64_t, Remote&> Raft::getVotingMembers()
+{
+  unordered_map<uint64_t, Remote&> nodes;
+  for (auto &i : remotes_) {
+    nodes.insert({i.first, i.second});
+  }
+  for (auto &i : witnesses_) {
+    nodes.insert({i.first, i.second});
+  }
+  return nodes;
+}
+
+void Raft::tick()
+{
+  quiesce_ = false;
+  tickCount_++;
+  if (timeForInMemoryGC()) {
+    logEntry_->InMemoryGC();
+  }
+  if (isLeader()) {
+    leaderTick();
+  } else {
+    nonLeaderTick();
+  }
+}
+
+void Raft::leaderTick()
+{
+  mustBeOrThrow(Leader);
+  electionTick_++;
+  // TODO: rate limit check
+  bool shouldAbortLeaderTransfer = timeForAbortLeaderTransfer();
+  if (timeForCheckQuorum()) {
+    electionTick_ = 0;
+    if (checkQuorum_) {
+      pbMessage m;
+      m.set_from(nodeID_);
+      m.set_type(raftpb::CheckQuorum);
+      Handle(m);
+    }
+  }
+  if (shouldAbortLeaderTransfer) {
+    abortLeaderTransfer();
+  }
+  heartbeatTick_++;
+  if (timeForHeartbeat()) {
+    heartbeatTick_ = 0;
+    pbMessage m;
+    m.set_from(nodeID_);
+    m.set_type(raftpb::LeaderHeartbeat);
+    Handle(m);
+  }
+}
+
+void Raft::nonLeaderTick()
+{
+  mustNotBeOrThrow(Leader);
+  electionTick_++;
+  // TODO: rate limit check
+  if (isObserver() || isWitness()) {
+    return;
+  }
+  if (!selfRemoved() && timeForElection()) {
+    electionTick_ = 0;
+    pbMessage m;
+    m.set_from(nodeID_);
+    m.set_type(raftpb::Election);
+    Handle(m);
+  }
+}
+
+void Raft::quiescedTick()
+{
+  if (!quiesce_) {
+    quiesce_ = true;
+    // FIXME r.log.inmem.resize()
+  }
+  electionTick_++;
+}
+
+bool Raft::timeForElection()
+{
+  return electionTick_ >= randomizedElectionTimeout_;
+}
+
+bool Raft::timeForHeartbeat()
+{
+  return heartbeatTick_ >= heartbeatTimeout_;
+}
+
+bool Raft::timeForCheckQuorum()
+{
+  return electionTick_ >= electionTimeout_;
+}
+
+bool Raft::timeForAbortLeaderTransfer()
+{
+  return isLeaderTransferring() && electionTick_ >= electionTimeout_;
+}
+
+bool Raft::timeForInMemoryGC()
+{
+  return tickCount_ % inMemoryGCTimeout_ == 0;
+}
 
 } // namespace raft
 

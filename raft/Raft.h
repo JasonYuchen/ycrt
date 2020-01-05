@@ -39,12 +39,15 @@ class Raft {
   };
   Raft(ConfigSPtr &config, LogDBSPtr &logdb);
   Status GetLocalStatus();
-  void Handle(pbMessageSPtr&);
+  void Handle(pbMessageSPtr&&m);
+  void Handle(pbMessageSPtr&m);
+  void Handle(pbMessage&&m);
+  void Handle(pbMessage&m);
  private:
   void initializeHandlerMap();
-  void checkHandlerMapOrThrow();
 
   // status
+  std::string describe();
   void loadState(const pbStateSPtr &state);
   bool isFollower();
   bool isPreCandidate();
@@ -52,7 +55,8 @@ class Raft {
   bool isLeader();
   bool isObserver();
   bool isWitness();
-  void isLeaderOrThrow();
+  void mustBeOrThrow(State);
+  void mustNotBeOrThrow(State);
   uint64_t quorum();
   uint64_t numVotingMembers();
   void resetMatchValueArray();
@@ -60,7 +64,7 @@ class Raft {
   bool leaderHasQuorum();
   std::vector<uint64_t> getNodes();
   std::vector<uint64_t> getSortedNodes();
-  std::unordered_map<uint64_t, Remote> getVotingMembers;
+  std::unordered_map<uint64_t, Remote&> getVotingMembers();
 
   // tick
   void tick();
@@ -71,11 +75,13 @@ class Raft {
   bool timeForHeartbeat();
   bool timeForCheckQuorum();
   bool timeForAbortLeaderTransfer();
+  bool timeForInMemoryGC();
+  // TODO: bool timeForRateLimitCheck();
   void setRandomizedElectionTimeout();
 
   // send
-  void finalizeMessageTerm(pbMessageSPtr &m);
-  void send(pbMessageSPtr);
+  void finalizeMessageTerm(pbMessage &m);
+  void send(pbMessage &m);
   void sendReplicateMessage(uint64_t to);
   void broadcastReplicateMessage();
   void sendHeartbeatMessage(uint64_t to /*, pbSystemCtx hint*/, uint64_t match);
@@ -89,9 +95,9 @@ class Raft {
   std::vector<pbEntrySPtr> makeMetadataEntries(std::vector<pbEntrySPtr> &entries);
 
   // message dropped
-  void reportDroppedConfigChange(pbEntrySPtr);
-  void reportDroppedProposal(pbMessageSPtr);
-  void reportDroppedReadIndex(pbMessageSPtr);
+  void reportDroppedConfigChange(pbEntry &m);
+  void reportDroppedProposal(pbMessage &m);
+  void reportDroppedReadIndex(pbMessage &m);
 
   // log append and commit
   void sortMatchValues();
@@ -113,7 +119,7 @@ class Raft {
   // election
   void campaign();
   uint64_t handleVoteResp(uint64_t from, bool rejected);
-  bool canGrantVote(pbMessageSPtr&);
+  bool canGrantVote(pbMessage &m);
 
   // membership
   bool selfRemoved();
@@ -131,71 +137,74 @@ class Raft {
   void setPendingConfigChange(bool isPendingConfigChange);
   uint64_t getPendingConfigChangeCount();
   bool hasConfigChangeToApply();
+  bool isLeaderTransferring();
+  void abortLeaderTransfer();
 
   // handlers
-  void handleHeartbeat(pbMessageSPtr&);
-  void handleInstallSnapshot(pbMessageSPtr&);
-  void handleReplicate(pbMessageSPtr&);
+  void handleHeartbeat(pbMessage &m);
+  void handleInstallSnapshot(pbMessage &m);
+  void handleReplicate(pbMessage &m);
   bool isRequestMessage(pbMessageType type);
   bool isLeaderMessage(pbMessageType type);
-  bool dropRequestVoteFromHighTermNode(pbMessageSPtr&);
-  bool onMessageTermNotMatched(pbMessageSPtr&);
-  void handleElection(pbMessageSPtr&);
-  void handleRequestVote(pbMessageSPtr&);
-  void handleConfigChange(pbMessageSPtr&);
-  void handleLocalTick(pbMessageSPtr&);
-  void handleRestoreRemote(pbMessageSPtr&);
+  bool dropRequestVoteFromHighTermNode(pbMessage &m);
+  bool onMessageTermNotMatched(pbMessage &m);
+  void handleElection(pbMessage &m);
+  void handleRequestVote(pbMessage &m);
+  void handleConfigChange(pbMessage &m);
+  void handleLocalTick(pbMessage &m);
+  void handleRestoreRemote(pbMessage &m);
 
   // handlers in Leader node
-  void handleLeaderPropose(pbMessageSPtr&);
-  void handleLeaderHeartbeat(pbMessageSPtr&);
-  void handleLeaderCheckQuorum(pbMessageSPtr&);
+  void handleLeaderPropose(pbMessage &m);
+  void handleLeaderHeartbeat(pbMessage &m);
+  void handleLeaderCheckQuorum(pbMessage &m);
   bool hasCommittedEntryAtCurrentTerm();
-  // addReadyToread
-  void handleLeaderReadIndex(pbMessageSPtr&);
-  void handleLeaderReplicateResp(pbMessageSPtr&);
-  void handleLeaderHeartbeatResp(pbMessageSPtr&);
-  void handleLeaderLeaderTransfer(pbMessageSPtr&);
-  void handleReadIndexLeaderConfirmation(pbMessageSPtr&);
-  void handleLeaderSnapshotStatus(pbMessageSPtr&);
-  void handleLeaderUnreachable(pbMessageSPtr&);
+  // TODO: addReadyToread
+  void handleLeaderReadIndex(pbMessage &m);
+  void handleLeaderReplicateResp(pbMessage &m);
+  void handleLeaderHeartbeatResp(pbMessage &m);
+  void handleLeaderLeaderTransfer(pbMessage &m);
+  void handleReadIndexLeaderConfirmation(pbMessage &m);
+  void handleLeaderSnapshotStatus(pbMessage &m);
+  void handleLeaderUnreachable(pbMessage &m);
   Remote *getRemoteByNodeID(uint64_t nodeID);
 
   // handlers in Observer - re-route to follower's handlers
-  void handleObserverPropose(pbMessageSPtr&);
-  void handleObserverReplicate(pbMessageSPtr&);
-  void handleObserverHeartbeat(pbMessageSPtr&);
-  void handleObserverInstallSnapshot(pbMessageSPtr&);
-  void handleObserverReadIndex(pbMessageSPtr&);
-  void handleObserverReadIndexResp(pbMessageSPtr&);
+  void handleObserverPropose(pbMessage &m);
+  void handleObserverReplicate(pbMessage &m);
+  void handleObserverHeartbeat(pbMessage &m);
+  void handleObserverInstallSnapshot(pbMessage &m);
+  void handleObserverReadIndex(pbMessage &m);
+  void handleObserverReadIndexResp(pbMessage &m);
 
   // handlers in witness - re-route to follower's handlers
-  void handleWitnessReplicate(pbMessageSPtr&);
-  void handleWitnessHeartbeat(pbMessageSPtr&);
-  void handleWitnessInstallSnapshot(pbMessageSPtr&);
+  void handleWitnessReplicate(pbMessage &m);
+  void handleWitnessHeartbeat(pbMessage &m);
+  void handleWitnessInstallSnapshot(pbMessage &m);
 
   // handlers in follower
-  void handleFollowerPropose(pbMessageSPtr&);
-  void handleFollowerReplicate(pbMessageSPtr&);
-  void handleFollowerHeartbeat(pbMessageSPtr&);
-  void handleFollowerReadIndex(pbMessageSPtr&);
-  void handleFollowerLeaderTransfer(pbMessageSPtr&);
-  void handleFollowerReadIndexResp(pbMessageSPtr&);
-  void handleFollowerInstallSnapshot(pbMessageSPtr&);
-  void handleFollowerTimeoutNow(pbMessageSPtr&);
+  void handleFollowerPropose(pbMessage &m);
+  void handleFollowerReplicate(pbMessage &m);
+  void handleFollowerHeartbeat(pbMessage &m);
+  void handleFollowerReadIndex(pbMessage &m);
+  void handleFollowerLeaderTransfer(pbMessage &m);
+  void handleFollowerReadIndexResp(pbMessage &m);
+  void handleFollowerInstallSnapshot(pbMessage &m);
+  void handleFollowerTimeoutNow(pbMessage &m);
 
   // handlers in candidate
   void termMatchedOrThrow(uint64_t term);
-  void handleCandidatePropose(pbMessageSPtr&);
-  void handleCandidateReplicate(pbMessageSPtr&);
-  void handleCandidateHeartbeat(pbMessageSPtr&);
-  void handleCandidateReadIndex(pbMessageSPtr&);
-  void handleCandidateInstallSnapshot(pbMessageSPtr&);
-  void handleCandidateRequestVoteResp(pbMessageSPtr&);
+  void handleCandidatePropose(pbMessage &m);
+  void handleCandidateReplicate(pbMessage &m);
+  void handleCandidateHeartbeat(pbMessage &m);
+  void handleCandidateReadIndex(pbMessage &m);
+  void handleCandidateInstallSnapshot(pbMessage &m);
+  void handleCandidateRequestVoteResp(pbMessage &m);
 
   slogger log;
   uint64_t clusterID_;
   uint64_t nodeID_;
+  std::string cn_; // for output purpose, [clusterID_:nodeID_], e.g. [1:5]
   uint64_t leaderID_;
   uint64_t leaderTransferTargetID_;
   bool isLeaderTransfer_;
@@ -210,7 +219,7 @@ class Raft {
   std::unordered_map<uint64_t, Remote> witnesses_;
   std::vector<pbMessageSPtr> messages_;
   std::vector<uint64_t> matched_;
-  LogEntrySPtr log_;
+  LogEntrySPtr logEntry_;
   // ReadIndexSPtr readIndex_;
   // std::vector<ReadyToReadSPtr> readyToRead_;
   std::vector<pbEntrySPtr> droppedEntries_;
@@ -223,9 +232,13 @@ class Raft {
   uint64_t electionTimeout_;
   uint64_t heartbeatTimeout_;
   uint64_t randomizedElectionTimeout_;
-  using MessageHandler = void(Raft::*)(pbMessageSPtr&);
+  uint64_t maxEntrySize_;
+  uint64_t inMemoryGCTimeout_;
+  using MessageHandler = void(Raft::*)(pbMessage &m);
   MessageHandler handlers_[NumOfState][NumOfMessageType];
 };
+using RaftSPtr = std::shared_ptr<Raft>;
+using RaftUPtr = std::shared_ptr<Raft>;
 
 const char *StateToString(enum Raft::State state);
 
