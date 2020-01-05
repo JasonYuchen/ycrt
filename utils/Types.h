@@ -8,10 +8,6 @@
 #define LIKELY(x) (__builtin_expect((x), 1))
 #define UNLIKELY(x) (__builtin_expect((x), 0))
 
-#define DEFAULT_COPY_AND_ASSIGN(TypeName)           \
-TypeName(const TypeName&) = default;                \
-TypeName& operator=(const TypeName&) = default
-
 #define DISALLOW_COPY_AND_ASSIGN(TypeName)          \
 TypeName(const TypeName&) = delete;                 \
 TypeName& operator=(const TypeName&) = delete
@@ -21,5 +17,19 @@ TypeName(const TypeName&) = delete;                 \
 TypeName& operator=(const TypeName&) = delete;      \
 TypeName(TypeName&&) = delete;                      \
 TypeName& operator=(const TypeName&&) = delete
+
+#define DEFAULT_COPY_AND_ASSIGN(TypeName)           \
+TypeName(const TypeName&) = default;                \
+TypeName& operator=(const TypeName&) = default
+
+#define DEFAULT_MOVE_AND_ASSIGN(TypeName)           \
+TypeName(TypeName&&) noexcept = default;            \
+TypeName& operator=(TypeName&&) noexcept = default
+
+#define DEFAULT_COPY_MOVE_AND_ASSIGN(TypeName)      \
+TypeName(const TypeName&) = default;                \
+TypeName& operator=(const TypeName&) = default;     \
+TypeName(TypeName&&) noexcept = default;            \
+TypeName& operator=(TypeName&&) noexcept = default
 
 #endif //YCRT_UTILS_TYPES_H_

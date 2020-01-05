@@ -7,6 +7,7 @@
 
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include "utils/Types.h"
+#include "utils/Error.h"
 
 namespace ycrt
 {
