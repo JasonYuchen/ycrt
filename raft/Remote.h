@@ -29,6 +29,7 @@ struct Remote {
   bool DecreaseTo(uint64_t rejected, uint64_t last);
   bool IsPaused();
   bool IsActive();
+  void SetActive(bool active);
   void RetryToWait();
   void WaitToRetry();
 

@@ -118,6 +118,11 @@ bool Remote::IsActive()
   return Active;
 }
 
+void Remote::SetActive(bool active)
+{
+  Active = active;
+}
+
 void Remote::RetryToWait()
 {
   if (State == Retry) {
