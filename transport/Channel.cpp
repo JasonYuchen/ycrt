@@ -33,6 +33,7 @@ SendChannel::SendChannel(
     nodeRecord_(std::move(nodeRecord)),
     bufferQueue_(make_shared<BlockingConcurrentQueue<pbMessageSPtr>>(queueLen))
 {
+  buffer_.reserve(RequestHeaderSize);
 }
 
 void SendChannel::Start()
@@ -83,10 +84,14 @@ void SendChannel::asyncSendMessage()
     if (!inProgress) {
       log->debug("SendChannel to {0} with next message {1}",
         nodeRecord_->Address, outputQueue_.front()->DebugString());
-      outputQueue_.front()->SerializeToString(&buffer_);
-      RequestHeader header{RequestType, 0, buffer_.size()};
-      header.Encode(headerBuf_, RequestHeaderSize);
-      buffer_ = std::string(headerBuf_, RequestHeaderSize) + buffer_;
+      // FIXME: do not hack
+      RequestHeader header{RequestType, 0, 0};
+      buffer_.clear();
+      buffer_.insert(0, RequestHeaderSize, 0);
+      header.Encode(const_cast<char *>(buffer_.data()), RequestHeaderSize);
+      outputQueue_.front()->AppendToString(&buffer_);
+      uint64_t total = buffer_.size() - RequestHeaderSize;
+      ::memcpy(const_cast<char *>(buffer_.data()+8), &total, sizeof(total));
       sendMessage();
     }
   });

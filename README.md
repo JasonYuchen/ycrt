@@ -6,8 +6,8 @@ Deeply inspired by dragonboat. (could be considered as a C++ version of dragonbo
 
 ## dependencies
 
-1. boost.Asio
-2. spdlog
+1. boost.Asio (Transport)
+2. spdlog (Logger)
 3. protobuf (pending)
 4. rocksdb (pending)
 
