@@ -6,7 +6,6 @@
 #define YCRT_UTILS_ERROR_H_
 
 #include <stdexcept>
-#include "Utils.h"
 #include "Types.h"
 
 namespace ycrt
@@ -31,23 +30,6 @@ class Error : public std::runtime_error {
   explicit Error(ErrorCode code, const char *what = "")
     : std::runtime_error(what), code_(code) {}
   Error(ErrorCode code, const std::string &what)
-    : std::runtime_error(what), code_(code) {}
-  static Error InvalidConfig(const char *what = "") { return Error(errInvalidConfig, what); }
- private:
-  ErrorCode code_;
-};
-
-//class LogCompacted : public Error {
-// public:
-//  explicit LogCompacted(const char *what = "") : Error(errLogCompacted, what) {}
-//};
-
-// unrecoverable fatal errors, system is inconsistent or corrupted
-class Fatal : public std::runtime_error {
- public:
-  explicit Fatal(ErrorCode code, const char *what = "")
-    : std::runtime_error(what), code_(code) {}
-  Fatal(ErrorCode code, const std::string &what)
     : std::runtime_error(what), code_(code) {}
  private:
   ErrorCode code_;
@@ -125,6 +107,7 @@ class StatusWith {
     }
   }
 private:
+  // use unique_ptr to store the result?
   Result result_;
   ErrorCode error_;
 };

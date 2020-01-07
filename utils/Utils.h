@@ -11,6 +11,7 @@
 
 #include <memory>
 #include <experimental/string_view>
+#include "Error.h"
 #include "Types.h"
 #include "Logger.h"
 #include "concurrentqueue/blockingconcurrentqueue.h"
