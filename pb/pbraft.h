@@ -7,11 +7,13 @@
 
 #include "settings/Hard.h"
 #include <stdint.h>
+#include <assert.h>
 #include <unordered_map>
 #include <memory>
 #include <string>
 #include <string.h>
 #include <vector>
+#include <type_traits>
 #include <spdlog/fmt/fmt.h>
 #include "utils/Types.h"
 
@@ -97,36 +99,88 @@ struct RequestHeader {
   uint32_t Method;
   uint32_t CRC32;
   uint64_t Size;
-  // FIXME
-  void Encode(char *buf, size_t len) {
-    ::memcpy(&buf[0], &Method, 4);
-    ::memcpy(&buf[4], &CRC32, 4);
-    ::memcpy(&buf[8], &Size, 8);
-  }
-  // FIXME
-  static RequestHeader Decode(const char *buf, size_t len) {
-    RequestHeader header{};
-    ::memcpy(&header.Method, &buf[0], 4);
-    ::memcpy(&header.CRC32, &buf[4], 4);
-    ::memcpy(&header.Size, &buf[8], 8);
-    return header;
-  }
+//  // FIXME
+//  void Encode(char *buf, size_t len) {
+//    ::memcpy(&buf[0], &Method, 4);
+//    ::memcpy(&buf[4], &CRC32, 4);
+//    ::memcpy(&buf[8], &Size, 8);
+//  }
+//  // FIXME
+//  static RequestHeader Decode(const char *buf, size_t len) {
+//    RequestHeader header{};
+//    ::memcpy(&header.Method, &buf[0], 4);
+//    ::memcpy(&header.CRC32, &buf[4], 4);
+//    ::memcpy(&header.Size, &buf[8], 8);
+//    return header;
+//  }
 };
 
 static_assert(RequestHeaderSize == sizeof(RequestHeader),
   "RequestHeaderSize != 16");
 
+//   |--------header size------|xxxxxxxxxx|-------------|
+// data_                     begin       cur           end
+// remaining = end - cur
+// total = end - data_
+
 class Buffer {
  public:
-  void Append(const char *data, uint64_t len);
-  void Append(const std::string &data);
-  void Append(uint64_t data);
-  void Append(uint32_t data);
-  void Append(uint16_t data);
-  void Append(uint8_t data);
+  explicit Buffer(uint64_t headerSize = RequestHeaderSize)
+    : headerSize(headerSize), cur(0), buf(headerSize) {}
+  template<typename T>
+  void EncodeHeader(T header)
+  {
+    assert(sizeof(T) == headerSize);
+    static_assert(sizeof(T) == RequestHeaderSize, "Only support RequestHeader");
+    ::memcpy(buf.data(), &header, sizeof(header));
+  }
+  const char *Data()
+  {
+    return buf.data();
+  }
+  char *MutableData()
+  {
+    return buf.data();
+  }
+  uint64_t Length()
+  {
+    return buf.size();
+  }
+  void Append(const char *data, uint64_t len)
+  {
+    ensure(len);
+    ::memcpy(buf.data(), data, len);
+    cur += len;
+  }
+  void Append(std::string &&data)
+  {
+    Append(data);
+  }
+  void Append(const std::string &data)
+  {
+    ensure(data.size());
+    ::memcpy(buf.data(), data.data(), data.size());
+    cur += data.size();
+  }
+  template<typename T>
+  void Append(T data)
+  {
+    static_assert(std::is_arithmetic<T>::value, "append arithmetic");
+    ensure(sizeof(data));
+    ::memcpy(buf.data(), &data, sizeof(data));
+    cur += sizeof(data);
+  }
+  ~Buffer() = default;
  private:
-  char *data;
-  uint64_t length;
+  void ensure(uint64_t len)
+  {
+    if (cur + len > buf.size()) {
+      buf.resize(2 * buf.size());
+    }
+  }
+  uint64_t headerSize;
+  uint64_t cur;
+  std::vector<char> buf;
 };
 
 class Bootstrap {
@@ -259,6 +313,7 @@ class SnapshotChunk {
   uint64_t onDiskIndex = 0;                             //18
   bool witness = false;                                 //19
 };
+using SnapshotChunkSPtr = std::shared_ptr<SnapshotChunk>;
 
 class Snapshot {
  public:
@@ -303,6 +358,7 @@ class Message {
   SnapshotSPtr snapshot;                                //13
 };
 using MessageSPtr = std::shared_ptr<Message>;
+using MessageUPtr = std::unique_ptr<Message>;
 
 class MessageBatch {
  public:
@@ -313,7 +369,7 @@ class MessageBatch {
   uint64_t deploymentID = 0;                            // 1
   std::string sourceAddress;                            // 2
   uint64_t binVersion = 0;                              // 3
-  std::vector<Message> requests;                        // 4
+  std::vector<MessageUPtr> requests;                    // 4
 };
 using MessageBatchSPtr = std::shared_ptr<MessageBatch>;
 

@@ -41,6 +41,11 @@ typedef struct SystemCtx {
   uint64_t High;
 } pbSystemCtx;
 
+inline bool operator==(const SystemCtx &lhs, const SystemCtx &rhs)
+{
+  return lhs.Low == rhs.Low && lhs.High == rhs.High;
+}
+
 typedef struct ReadyToRead {
   uint64_t Index;
   struct SystemCtx SystemCtx;
