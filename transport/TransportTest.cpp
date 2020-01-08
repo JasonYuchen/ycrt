@@ -33,7 +33,7 @@ TEST(Transport, Client)
   transport2->Start();
   Log.GetLogger("transport")->info("test start");
 
-  pbMessageSPtr msg(new raftpb::Message());
+  pbMessageUPtr msg(new raftpb::Message());
   msg->set_cluster_id(1);
   msg->set_to(2);
   msg->set_from(1);

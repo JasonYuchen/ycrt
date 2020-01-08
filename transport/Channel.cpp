@@ -31,7 +31,7 @@ SendChannel::SendChannel(
     socket_(io),
     resolver_(io),
     nodeRecord_(std::move(nodeRecord)),
-    bufferQueue_(make_shared<BlockingConcurrentQueue<pbMessageSPtr>>(queueLen))
+    bufferQueue_(make_shared<BlockingConcurrentQueue<pbMessageUPtr>>(queueLen))
 {
   buffer_.reserve(RequestHeaderSize);
 }
@@ -43,7 +43,7 @@ void SendChannel::Start()
 
 // one channel per remote raft node,
 // asyncSendMessage of each SendChannel will only be called in one thread
-bool SendChannel::AsyncSendMessage(pbMessageSPtr m)
+bool SendChannel::AsyncSendMessage(pbMessageUPtr m)
 {
   auto done = bufferQueue_->try_enqueue(std::move(m));
   if (!done) {
@@ -64,7 +64,7 @@ void SendChannel::asyncSendMessage()
   boost::asio::post(io_, [this, self = shared_from_this()](){
     inQueue_ = false;
     // fetch all in bufferQueue, 10 ?
-    vector<pbMessageSPtr> items(10);
+    vector<pbMessageUPtr> items(10);
     auto count = bufferQueue_->try_dequeue_bulk(items.begin(), 10);
     if (count == 0) {
       return;

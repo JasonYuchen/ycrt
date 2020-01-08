@@ -60,7 +60,7 @@ Transport::Transport(NodeHostConfigSPtr nhConfig)
   log->info("start listening on {0}", nhConfig_->ListenAddress);
 }
 
-bool Transport::AsyncSendMessage(pbMessageSPtr m)
+bool Transport::AsyncSendMessage(pbMessageUPtr m)
 {
   NodesRecordSPtr node = resolver_->Resolve(m->cluster_id(), m->to());
   if (node == nullptr) {
