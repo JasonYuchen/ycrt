@@ -6,6 +6,7 @@
 #define YCRT_UTILS_ERROR_H_
 
 #include <stdexcept>
+#include <spdlog/fmt/fmt.h>
 #include "Types.h"
 
 namespace ycrt
@@ -22,6 +23,9 @@ enum ErrorCode : uint32_t {
   errLogUnavailable,
   errSnapshotUnavailable,
   errUnexpectedRaftState,
+  errRaftMessage,
+  errLogMismatch,
+  errEmptySnapshot,
 };
 
 // maybe recoverable
@@ -31,6 +35,11 @@ class Error : public std::runtime_error {
     : std::runtime_error(what), code_(code) {}
   Error(ErrorCode code, const std::string &what)
     : std::runtime_error(what), code_(code) {}
+  template<typename S, typename... Args>
+  Error(ErrorCode code, const S& format_str, Args&&... args)
+    : std::runtime_error(
+        fmt::format(format_str, std::forward<Args...>(args...))),
+      code_(code) {}
  private:
   ErrorCode code_;
 };
