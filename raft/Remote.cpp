@@ -76,7 +76,7 @@ void Remote::Progress(uint64_t lastIndex)
   } else if (State == Retry) {
     RetryToWait();
   } else {
-    throw Fatal(errRemoteState, "unexpected remote state");
+    throw Error(errRemoteState, "unexpected remote state");
   }
 }
 
