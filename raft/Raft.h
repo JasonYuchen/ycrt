@@ -12,11 +12,13 @@
 #include <functional>
 #include <random>
 
+#include "server/Event.h"
 #include "utils/Utils.h"
 #include "Remote.h"
 #include "pb/RaftMessage.h"
 #include "LogEntry.h"
 #include "ycrt/Config.h"
+#include "server/Event.h"
 
 namespace ycrt
 {
@@ -40,16 +42,15 @@ class Raft {
   };
   Raft(ConfigSPtr &config, LogDBSPtr &logdb);
   Status GetLocalStatus();
-  void Handle(pbMessageSPtr&&m);
-  void Handle(pbMessageSPtr&m);
-  void Handle(pbMessage&&m);
-  void Handle(pbMessage&m);
+  void Handle(pbMessage &&m);
+  void Handle(pbMessage &m);
  private:
   void initializeHandlerMap();
 
   // status
   std::string describe();
   void loadState(const pbStateSPtr &state);
+  void setLeaderID(uint64_t leader);
   bool isFollower();
   bool isPreCandidate();
   bool isCandidate();
@@ -62,10 +63,12 @@ class Raft {
   uint64_t numVotingMembers();
   void resetMatchValueArray();
   bool isSingleNodeQuorum();
+  bool isLeaderTransferring();
   bool leaderHasQuorum();
   std::vector<uint64_t> getNodes();
   std::vector<uint64_t> getSortedNodes();
   std::unordered_map<uint64_t, Remote&> getVotingMembers();
+  Remote *getRemoteByNodeID(uint64_t nodeID, bool must);
 
   // tick
   void tick();
@@ -82,31 +85,32 @@ class Raft {
 
   // send
   void finalizeMessageTerm(pbMessage &m);
-  void send(pbMessage &m);
+  void send(pbMessageUPtr m);
   void sendReplicateMessage(uint64_t to);
   void broadcastReplicateMessage();
   void sendHeartbeatMessage(uint64_t to ,pbSystemCtx hint, uint64_t match);
   void broadcastHeartbeatMessage();
-  void broadcastHeartbeatMessage(/*pbSystemCtx hint*/uint64_t hint);
+  void broadcastHeartbeatMessage(pbSystemCtx hint);
   void sendTimeoutNowMessage(uint64_t to);
 
   // message generation
-  pbMessageSPtr makeInstallSnapshotMessage(uint64_t to);
-  pbMessageSPtr makeReplicateMessage(uint64_t to, uint64_t next, uint64_t maxSize);
-  std::vector<pbEntrySPtr> makeMetadataEntries(std::vector<pbEntrySPtr> &entries);
+  pbMessageUPtr makeInstallSnapshotMessage(uint64_t to);
+  pbMessageUPtr makeReplicateMessage(uint64_t to, uint64_t next, uint64_t maxSize);
+  std::vector<pbEntry> makeMetadataEntries(const std::vector<pbEntry> &entries);
+  void finalizeWitnessSnapshot(pbSnapshot &s);
 
   // message dropped
-  void reportDroppedConfigChange(pbEntry &m);
+  void reportDroppedConfigChange(pbEntry &&e);
   void reportDroppedProposal(pbMessage &m);
   void reportDroppedReadIndex(pbMessage &m);
 
   // log append and commit
   void sortMatchValues();
   bool tryCommit();
-  void appendEntries(std::vector<pbEntrySPtr> &entries);
+  void appendEntries(std::vector<pbEntry> &entries);
 
   // state transition
-  void reset();
+  void reset(uint64_t term);
   void resetRemotes();
   void resetObservers();
   void resetWitnesses();
@@ -116,6 +120,7 @@ class Raft {
   void becomePreCandidate();
   void becomeCandidate();
   void becomeLeader();
+  bool restore(const pbSnapshot &s);
 
   // election
   void campaign();
@@ -128,17 +133,12 @@ class Raft {
   void addObserver(uint64_t nodeID);
   void addWitness(uint64_t nodeID);
   void removeNode(uint64_t nodeID);
-  void deleteRemote(uint64_t nodeID);
-  void deleteObserver(uint64_t nodeID);
-  void deleteWitness(uint64_t nodeID);
   void setRemote(uint64_t nodeID, uint64_t match, uint64_t next);
   void setObserver(uint64_t nodeID, uint64_t match, uint64_t next);
   void setWitness(uint64_t nodeID, uint64_t match, uint64_t next);
-  bool hasPendingConfigChange();
-  void setPendingConfigChange(bool isPendingConfigChange);
   uint64_t getPendingConfigChangeCount();
+  void preLeaderPromotionHandleConfigChange();
   bool hasConfigChangeToApply();
-  bool isLeaderTransferring();
   void abortLeaderTransfer();
 
   // handlers
@@ -168,7 +168,6 @@ class Raft {
   void handleReadIndexLeaderConfirmation(pbMessage &m);
   void handleLeaderSnapshotStatus(pbMessage &m);
   void handleLeaderUnreachable(pbMessage &m);
-  Remote *getRemoteByNodeID(uint64_t nodeID);
 
   // handlers in Observer - re-route to follower's handlers
   void handleObserverPropose(pbMessage &m);
@@ -194,7 +193,6 @@ class Raft {
   void handleFollowerTimeoutNow(pbMessage &m);
 
   // handlers in candidate
-  void termMatchedOrThrow(uint64_t term);
   void handleCandidatePropose(pbMessage &m);
   void handleCandidateReplicate(pbMessage &m);
   void handleCandidateHeartbeat(pbMessage &m);
@@ -208,7 +206,7 @@ class Raft {
   std::string cn_; // for output purpose, [clusterID_:nodeID_], e.g. [1:5]
   uint64_t leaderID_;
   uint64_t leaderTransferTargetID_;
-  bool isLeaderTransfer_;
+  bool isLeaderTransferTarget_;
   bool pendingConfigChange_;
   State state_;
   uint64_t term_;
@@ -218,12 +216,12 @@ class Raft {
   std::unordered_map<uint64_t, Remote> remotes_;
   std::unordered_map<uint64_t, Remote> observers_;
   std::unordered_map<uint64_t, Remote> witnesses_;
-  std::vector<pbMessageSPtr> messages_;
+  std::vector<pbMessageUPtr> messages_;
   std::vector<uint64_t> matched_;
   LogEntrySPtr logEntry_;
   // ReadIndexSPtr readIndex_;
   std::vector<pbReadyToRead> readyToRead_;
-  std::vector<pbEntrySPtr> droppedEntries_;
+  std::vector<pbEntry> droppedEntries_;
   std::vector<pbSystemCtx> droppedReadIndexes_;
   bool quiesce_;
   bool checkQuorum_;
@@ -238,6 +236,9 @@ class Raft {
   std::mt19937_64 randomEngine_;
   using MessageHandler = void(Raft::*)(pbMessage &m);
   MessageHandler handlers_[NumOfState][NumOfMessageType];
+  // FIXME
+  // hasNotAppliedConfigChange
+  server::RaftEventListenerSPtr listener_;
 };
 using RaftSPtr = std::shared_ptr<Raft>;
 using RaftUPtr = std::shared_ptr<Raft>;
