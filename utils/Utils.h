@@ -34,6 +34,45 @@ using slogger = std::shared_ptr<spdlog::logger>;
 using string_view = std::experimental::string_view;
 using CircuitBreaker = circuitbreaker::NaiveCircuitBreaker;
 
+template<typename T>
+class Span {
+ public:
+  Span(T *start, size_t len) : start_(start), len_(len) {}
+  DEFAULT_COPY_MOVE_AND_ASSIGN(Span);
+  size_t size()
+  {
+    return len_;
+  }
+  T &operator[](size_t idx)
+  {
+    assert(idx < len_);
+    return start_[idx];
+  }
+  const T &operator[](size_t idx) const
+  {
+    assert(idx < len_);
+    return start_[idx];
+  }
+  T *data()
+  {
+    return start_;
+  }
+  const T *data() const
+  {
+    return start_;
+  }
+  Span SubSpan(size_t index, size_t len)
+  {
+    if (index + len > len_) {
+      throw Error(errOutOfRange);
+    }
+    return Span(start_ + index, len);
+  }
+ private:
+  T *start_;
+  size_t len_;
+};
+
 } // namespace ycrt
 
 #endif //YCRT_UTILS_UTILS_H_
