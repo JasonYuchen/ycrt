@@ -18,6 +18,8 @@ enum CompressionType {
 };
 
 constexpr uint64_t NoLeader = 0;
+constexpr uint64_t NoNode = 0;
+constexpr uint64_t NoLimit = UINT64_MAX;
 
 struct LeaderInfo {
   uint64_t ClusterID;
