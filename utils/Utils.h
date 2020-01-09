@@ -15,6 +15,7 @@
 #include "Types.h"
 #include "Logger.h"
 #include "concurrentqueue/blockingconcurrentqueue.h"
+#include "Circuitbreaker.h"
 
 namespace ycrt
 {
@@ -31,6 +32,7 @@ using BlockingConcurrentQueueUPtr
 
 using slogger = std::shared_ptr<spdlog::logger>;
 using string_view = std::experimental::string_view;
+using CircuitBreaker = circuitbreaker::NaiveCircuitBreaker;
 
 } // namespace ycrt
 

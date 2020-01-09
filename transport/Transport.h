@@ -77,7 +77,7 @@ class Transport {
   std::mutex mutex_;
   std::unordered_map<std::string, SendChannelSPtr> sendChannels_; // GUARDED BY mutex_;
   // BlockingConcurrentQueueUPtr<MessageBatchUPtr> outputQueue_;
-  // std::unordered_map<std::string, CircuitBreaker> breakers_;
+  std::unordered_map<std::string, CircuitBreaker> breakers_;
   // uint32_t lanes_;
   // TransportMetrics metrics_;
   // server::Context serverCtx_;
