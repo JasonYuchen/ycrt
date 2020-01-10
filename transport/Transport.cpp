@@ -20,49 +20,52 @@ using namespace boost::asio;
 using boost::system::error_code;
 using boost::system::system_error;
 
-TransportSPtr Transport::New(
-  NodeHostConfigSPtr nhConfig,
-  NodesSPtr resolver,
-  RaftMessageHandlerSPtr handlers,
+TransportUPtr Transport::New(
+  const NodeHostConfig &nhConfig,
+  Nodes &resolver,
+  RaftMessageHandler &handlers,
   function<string(uint64_t, uint64_t)> &&snapshotDirFunc,
   uint64_t ioContexts)
 {
-  TransportSPtr transport(new Transport(std::move(nhConfig)));
-  transport->resolver_ = std::move(resolver);
-  transport->handlers_ = std::move(handlers);
-  for (size_t i = 0; i < ioContexts; ++i) {
-    transport->ioctxs_.emplace_back(new ioctx());
-  }
-  return transport;
+  TransportUPtr t(new Transport(
+    nhConfig, resolver, handlers, std::move(snapshotDirFunc), ioContexts));
+  return t;
 }
 
-Transport::Transport(NodeHostConfigSPtr nhConfig)
+Transport::Transport(
+  const NodeHostConfig &nhConfig,
+  Nodes &resolver,
+  RaftMessageHandler &handlers,
+  function<string(uint64_t, uint64_t)> &&snapshotDirFunc,
+  uint64_t ioContexts)
   : log(Log.GetLogger("transport")),
-    nhConfig_(std::move(nhConfig)),
     io_(1),
     worker_(io_),
     main_([this](){ io_.run(); }),
     stopped_(false),
     ioctxIdx_(0),
     ioctxs_(),
-    acceptor_(io_, getEndpoint(string_view(nhConfig_->ListenAddress))),
+    acceptor_(io_, getEndpoint(string_view(nhConfig.ListenAddress))),
     streamConnections_(Soft::ins().StreamConnections),
     sendQueueLength_(Soft::ins().SendQueueLength),
     getConnectedTimeoutS_(Soft::ins().GetConnectedTimeoutS),
-    idleTimeoutS_(60), // TODO: add idleTimeoutS to soft?
-    deploymentID_(nhConfig_->DeploymentID),
+    idleTimeoutS_(60), // TODO: add idleTimeoutS to soft?, add idleTimeoutS_ to Asio to handle timeout events
+    deploymentID_(nhConfig.DeploymentID),
     mutex_(),
     sendChannels_(),
-    sourceAddress_(nhConfig_->RaftAddress),
-    resolver_(),
-    handlers_()
+    sourceAddress_(nhConfig.RaftAddress),
+    resolver_(resolver),
+    handlers_(handlers)
 {
-  log->info("start listening on {0}", nhConfig_->ListenAddress);
+  for (size_t i = 0; i < ioContexts; ++i) {
+    ioctxs_.emplace_back(new ioctx());
+  }
+  log->info("start listening on {0}", nhConfig.ListenAddress);
 }
 
 bool Transport::AsyncSendMessage(pbMessageUPtr m)
 {
-  NodesRecordSPtr node = resolver_->Resolve(m->cluster_id(), m->to());
+  NodesRecordSPtr node = resolver_.Resolve(m->cluster_id(), m->to());
   if (node == nullptr) {
     log->warn(
       "{0} do not have the address for {1:d}:{2:d}, dropping a message",
@@ -108,18 +111,18 @@ void Transport::Start()
                 if (req.from() != 0) {
                   log->info("new remote address learnt: {0:d}:{1:d} in {2}",
                     req.cluster_id(), req.from(), addr);
-                  resolver_->AddRemoteAddress(
+                  resolver_.AddRemoteAddress(
                     req.cluster_id(), req.from(), addr);
                 }
               }
             }
-            handlers_->handleMessageBatch(std::move(m));
+            handlers_.handleMessageBatch(std::move(m));
             // TODO: metrics
           });
         conn->SetChunkHandlerPtr(
           [this](pbSnapshotChunkSPtr m)
           {
-            // TODO
+            // FIXME
             log->warn("snapshot chunk not supported currently");
           });
         conn->Start();

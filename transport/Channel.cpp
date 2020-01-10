@@ -63,7 +63,7 @@ void SendChannel::asyncSendMessage()
 {
   boost::asio::post(io_, [this, self = shared_from_this()](){
     inQueue_ = false;
-    // fetch all in bufferQueue, 10 ?
+    // FIXME: fetch all in bufferQueue, 10 ?
     vector<pbMessageUPtr> items(10);
     auto count = bufferQueue_->try_dequeue_bulk(items.begin(), 10);
     if (count == 0) {
@@ -118,7 +118,6 @@ void SendChannel::sendMessage()
           nodeRecord_->Address, ec.message());
         transport_->RemoveSendChannel(nodeRecord_->Key);
         socket_.close();
-        // shutdown, remove this channel from sendChannels_;
       }
     });
 }
@@ -155,19 +154,13 @@ void SendChannel::connect(tcp::resolver::results_type endpointIter)
         log->info("SendChannel connect to {0}", endpoint.address().to_string());
         isConnected_ = true;
         asyncSendMessage();
-//        if (!outputQueue_.empty()) {
-//          outputQueue_.front()->SerializeToString(&buffer_);
-//          sendMessage();
-//        }
       } else if (ec.value() == error::operation_aborted) {
         return;
       } else {
-        // do log
         log->warn("SendChannel to {0} closed due to async_connect error {1}",
           nodeRecord_->Address, ec.message());
         transport_->RemoveSendChannel(nodeRecord_->Key);
         socket_.close();
-        // shutdown, remove this channel from sendChannels_;
       }
     });
 }
@@ -208,6 +201,7 @@ void RecvChannel::readHeader()
           log->error("RecvChannel closed due to invalid header");
         }
         socket_.close();
+        return;
       }
     });
 }
@@ -224,7 +218,9 @@ void RecvChannel::readPayload()
           auto msg = make_unique<raftpb::MessageBatch>();
           auto done = msg->ParseFromArray(payloadBuf_.data(), header_.Size);
           if (!done) {
-            //rpc_->error();
+            log->error("RecvChannel closed due to invalid payload(MessageBatch)",
+              ec.message());
+            socket_.close();
             return;
           }
           requestHandler_(std::move(msg));
@@ -232,7 +228,9 @@ void RecvChannel::readPayload()
           auto msg = make_unique<raftpb::SnapshotChunk>();
           auto done = msg->ParseFromArray(payloadBuf_.data(), header_.Size);
           if (!done) {
-            //Log.get("transport")->error();
+            log->error("RecvChannel closed due to invalid payload(SnapshotChunk)",
+              ec.message());
+            socket_.close();
             return;
           }
           chunkHandler_(std::move(msg));
@@ -249,6 +247,7 @@ void RecvChannel::readPayload()
         log->error("RecvChannel closed due to async_read error {0}",
           ec.message());
         socket_.close();
+        return;
       }
     });
 }

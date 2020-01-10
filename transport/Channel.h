@@ -49,6 +49,7 @@ static_assert(RequestHeaderSize == sizeof(RequestHeader),
   "RequestHeaderSize != 16");
 
 class Transport;
+// owned by Transport
 class SendChannel : public std::enable_shared_from_this<SendChannel> {
  public:
   explicit SendChannel(
@@ -77,13 +78,13 @@ class SendChannel : public std::enable_shared_from_this<SendChannel> {
   BlockingConcurrentQueueSPtr<pbMessageUPtr> bufferQueue_;
   std::queue<pbMessageBatchUPtr> outputQueue_;
   std::string buffer_;
-  char headerBuf_[RequestHeaderSize];
 };
 using SendChannelSPtr = std::shared_ptr<SendChannel>;
 using SendChannelUPtr = std::unique_ptr<SendChannel>;
 
 using RequestHandler = std::function<void(pbMessageBatchUPtr)>;
 using ChunkHandler = std::function<void(pbSnapshotChunkUPtr)>;
+// owned by Transport
 class RecvChannel : public std::enable_shared_from_this<RecvChannel> {
  public:
   explicit RecvChannel(Transport *tranport, boost::asio::io_context &io);

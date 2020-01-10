@@ -29,12 +29,13 @@ namespace transport
 // TODO: asyncSendSnapshot
 // TODO: snapshot streaming
 
+// owned by NodeHost
 class Transport {
  public:
-  static std::shared_ptr<Transport> New(
-    NodeHostConfigSPtr nhConfig,
-    NodesSPtr resolver,
-    RaftMessageHandlerSPtr handlers,
+  static std::unique_ptr<Transport> New(
+    const NodeHostConfig  &nhConfig,
+    Nodes &resolver,
+    RaftMessageHandler &handlers,
     std::function<std::string(uint64_t, uint64_t)> &&snapshotDirFunc,
     uint64_t ioContexts);
   //std::string name();
@@ -43,17 +44,21 @@ class Transport {
   uint64_t GetDeploymentID() { return deploymentID_; }
 
   bool AsyncSendMessage(pbMessageUPtr m);
-  //bool AsyncSendSnapshot(MessageUPtr m);
+  //bool AsyncSendSnapshot(pbMessageUPtr m);
   //std::shared_ptr<Sink> GetStreamConnection(uint64_t clusterID, uint64_t nodeID);
   void Start();
   void Stop();
   void RemoveSendChannel(const std::string &key);
   ~Transport();
  private:
-  Transport(NodeHostConfigSPtr);
+  explicit Transport(
+    const NodeHostConfig  &nhConfig,
+    Nodes &resolver,
+    RaftMessageHandler &handlers,
+    std::function<std::string(uint64_t, uint64_t)> &&snapshotDirFunc,
+    uint64_t ioContexts);
   boost::asio::io_context &nextIOContext();
   slogger log;
-  NodeHostConfigSPtr nhConfig_;
   boost::asio::io_context io_;
   boost::asio::io_context::work worker_;
   std::thread main_;
@@ -66,7 +71,7 @@ class Transport {
     std::thread executor;
   };
   std::atomic_uint64_t ioctxIdx_;
-  std::vector<std::shared_ptr<ioctx>> ioctxs_;
+  std::vector<std::unique_ptr<ioctx>> ioctxs_;
   boost::asio::ip::tcp::acceptor acceptor_;
   uint64_t streamConnections_;
   uint64_t sendQueueLength_;
@@ -76,16 +81,15 @@ class Transport {
 
   std::mutex mutex_;
   std::unordered_map<std::string, SendChannelSPtr> sendChannels_; // GUARDED BY mutex_;
-  // BlockingConcurrentQueueUPtr<MessageBatchUPtr> outputQueue_;
   std::unordered_map<std::string, CircuitBreaker> breakers_;
   // uint32_t lanes_;
   // TransportMetrics metrics_;
   // server::Context serverCtx_;
   std::string sourceAddress_;
-  NodesSPtr resolver_;
-  RaftMessageHandlerSPtr handlers_;
+  Nodes &resolver_; // owned by NodeHost
+  RaftMessageHandler &handlers_; // owned by NodeHost
 };
-using TransportSPtr = std::shared_ptr<Transport>;
+using TransportUPtr = std::unique_ptr<Transport>;
 
 } // namespace transport
 

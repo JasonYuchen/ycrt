@@ -28,9 +28,9 @@ ip::tcp::endpoint getEndpoint(string_view addrPort) // name:port
           static_cast<unsigned short>(stoi(addrPort.substr(pos+1).data()))};
 }
 
-shared_ptr<Nodes> Nodes::New(function<uint64_t(uint64_t)> &&partitionIDFunc)
+NodesUPtr Nodes::New(function<uint64_t(uint64_t)> &&partitionIDFunc)
 {
-  shared_ptr<Nodes> node(new Nodes());
+  NodesUPtr node(new Nodes());
   node->getPartitionID_ = std::move(partitionIDFunc);
   return node;
 }

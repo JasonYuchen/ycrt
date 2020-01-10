@@ -25,7 +25,7 @@ boost::asio::ip::tcp::endpoint getEndpoint(string_view addrPort);
 
 class Nodes {
  public:
-  static std::shared_ptr<Nodes> New(
+  static std::unique_ptr<Nodes> New(
     std::function<uint64_t(uint64_t)> &&partitionIDFunc);
   struct Record {
     explicit Record(const std::string &key);
@@ -54,9 +54,9 @@ class Nodes {
   std::unordered_map<NodeInfo, std::shared_ptr<Record>, NodeInfoHash> nodes_;
 };
 using NodesSPtr = std::shared_ptr<Nodes>;
+using NodesUPtr = std::unique_ptr<Nodes>;
 using NodesRecordSPtr = std::shared_ptr<Nodes::Record>;
 
-class NodeHost;
 class RaftMessageHandler {
  public:
   std::pair<uint64_t, uint64_t> handleMessageBatch(pbMessageBatchUPtr batch)
@@ -77,9 +77,7 @@ class RaftMessageHandler {
     Log.GetLogger("transport")->info("handleSnapshot received: {0:d}:{1:d} from {2}", clusterID, nodeID, from);
   }
  private:
-  std::weak_ptr<NodeHost> nh_;
 };
-using RaftMessageHandlerSPtr = std::shared_ptr<RaftMessageHandler>;
 
 } // namespace transport
 
