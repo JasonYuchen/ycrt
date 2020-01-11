@@ -853,6 +853,56 @@ bool Raft::restore(const pbSnapshot &s)
   return true;
 }
 
+void Raft::restoreRemotes(const pbSnapshot &s)
+{
+  uint64_t match = 0;
+  uint64_t next = logEntry_->LastIndex() + 1;
+
+  // restore full members
+  remotes_.clear();
+  for (auto &node : s.membership().addresses()) {
+    // promote observer
+    if (node.first == nodeID_ && isObserver()) {
+      becomeFollower(term_, leaderID_);
+    }
+    if (witnesses_.find(node.first) != witnesses_.end()) {
+      throw Error(errUnexpectedRaftState, "witness should not be promoted to a full member");
+    }
+    match = 0;
+    if (node.first == nodeID_) {
+      match = next - 1;
+    }
+    setRemote(node.first, match, next);
+    log->info("{0}: remote {1} is restored with {2}", describe(), node.first, remotes_[node.first]);
+  }
+  if (selfRemoved() && isLeader()) {
+    becomeFollower(term_, NoLeader);
+  }
+
+  // restore observers
+  observers_.clear();
+  for (auto &node : s.membership().observers()) {
+    match = 0;
+    if (node.first == nodeID_) {
+      match = next - 1;
+    }
+    setObserver(node.first, match, next);
+    log->info("{0}: observer {1} is restores with {2}", describe(), node.first, observers_[node.first]);
+  }
+
+  // restore witnesses
+  witnesses_.clear();
+  for (auto &node : s.membership().witnesses()) {
+    match = 0;
+    if (node.first == nodeID_) {
+      match = next - 1;
+    }
+    setWitness(node.first, match, next);
+    log->info("{0}: witness {1} is restores with {2}", describe(), node.first, witnesses_[node.first]);
+  }
+  resetMatchValueArray();
+}
+
 void Raft::campaign()
 {
   log->info("{0}: campaign, num of voting members is {1}", describe(), numVotingMembers());
@@ -1058,6 +1108,8 @@ void Raft::preLeaderPromotionHandleConfigChange()
 
 bool Raft::hasConfigChangeToApply()
 {
+  // TODO: scan all committed but not applied logs to find out
+  //  whether there is any ConfigChange entry
   return logEntry_->Committed() > applied_;
 }
 
@@ -1140,42 +1192,161 @@ void Raft::handleReplicate(pbMessage &m)
   }
   send(std::move(resp));
 }
+
 bool Raft::isRequestMessage(pbMessageType type)
 {
-  return false;
+  return
+    type == raftpb::Propose ||
+    type == raftpb::ReadIndex;
 }
+
 bool Raft::isLeaderMessage(pbMessageType type)
 {
-  return false;
+  return
+    type == raftpb::Replicate ||
+    type == raftpb::InstallSnapshot ||
+    type == raftpb::Heartbeat ||
+    type == raftpb::TimeoutNow ||
+    type == raftpb::ReadIndexResp;
 }
+
+// by dropping the RequestVote from high term node
+// when we do not exceed the minimum election timeout
+// we can minimize the interruption by network partition problem
+// Alternative approach: PreVote mechanism
 bool Raft::dropRequestVoteFromHighTermNode(pbMessage &m)
 {
-  return false;
+  if (m.type() != raftpb::RequestVote || !checkQuorum_ || m.term() < term_) {
+    return false;
+  }
+  if (m.hint() == m.from()) {
+    log->info("{0}: RequestVote with leader transfer hint received from {1}", describe(), m.from());
+    return false;
+  }
+  if (isLeader() && !quiesce_ && electionTick_ >= electionTimeout_) {
+    throw Error(errUnexpectedRaftState, "{0}: electionTick >= electionTimeout on leader detected", describe());
+  }
+  return leaderID_ != NoLeader && electionTick_ < electionTimeout_;
 }
+
 bool Raft::onMessageTermNotMatched(pbMessage &m)
 {
+  if (m.term() == 0 || m.term() == term_) {
+    return false;
+  }
+  if (dropRequestVoteFromHighTermNode(m)) {
+    log->info("{0}: dropped a RequestVote from {1} with term {2}", describe(), m.from(), m.term());
+    return true;
+  }
+  if (m.term() > term_) {
+    log->info("{0}: received a {1} from {2} with higher term={3}", describe(), m.type(), m.from(), m.term());
+    uint64_t leaderID = NoLeader;
+    if (isLeaderMessage(m.type())) {
+      leaderID = m.from();
+    }
+    if (isObserver()) {
+      becomeObserver(m.term(), leaderID);
+    } else if (isWitness()) {
+      becomeWitness(m.term(), leaderID);
+    } else {
+      becomeFollower(m.term(), leaderID);
+    }
+  } else if (m.term() < term_) {
+    if (isLeaderMessage(m.type()) && checkQuorum_) {
+      auto resp = make_unique<pbMessage>();
+      resp->set_to(m.from());
+      resp->set_type(raftpb::NoOP);
+      send(std::move(resp));
+    } else {
+      log->info("{0}: ignored a {1} from {2} with lower term={3}", describe(), m.type(), m.from(), m.term());
+    }
+    return true;
+  }
   return false;
 }
+
 void Raft::handleElection(pbMessage &m)
 {
-
+  if (!isLeader()) {
+    // there can be multiple pending membership change entries committed but not
+    // applied on this node. say with a cluster of X, Y and Z, there are two
+    // such entries for adding node A and B are committed but not applied
+    // available on X. If X is allowed to start a new election, it can become the
+    // leader with a vote from any one of the node Y or Z. Further proposals made
+    // by the new leader X in the next term will require a quorum of 2 which can
+    // have no overlap with the committed quorum of 3. this violates the safety
+    // requirement of raft.
+    // ignore the Election message when there is membership configure change
+    // committed but not applied
+    if (hasConfigChangeToApply()) {
+      log->warn("{0}: election skipped due to pending ConfigChange", describe());
+      if (listener_) {
+        auto info = server::CampaignInfo{};
+        info.ClusterID = clusterID_;
+        info.NodeID = nodeID_;
+        info.Term = term_;
+        listener_->CampaignSkipped(info);
+      }
+    }
+    log->info("{0}: start election at term={1}", describe(), term_);
+    campaign();
+  } else {
+    log->info("{0}: election ignored at leader node");
+  }
 }
+
 void Raft::handleRequestVote(pbMessage &m)
 {
-
+  auto resp = make_unique<pbMessage>();
+  resp->set_to(m.from());
+  resp->set_type(raftpb::RequestVoteResp);
+  bool canGrant = canGrantVote(m);
+  bool isLogUpToDate = logEntry_->IsUpToDate(m.log_index(), m.log_term());
+  if (canGrant && isLogUpToDate) {
+    log->info("{0}: cast vote from {1} with index={2}, term={3} and log term={4}", describe(), m.from(), m.log_index(), m.term(), m.log_term());
+    electionTick_ = 0;
+    vote_ = m.from();
+  } else {
+    log->info("{0}: rejected vote request from {1} with index={2}, term={3} and log term={4} due to canGrant={5}, upToDate={6}", describe(), m.from(), m.log_index(), m.term(), m.log_term(), canGrant, isLogUpToDate);
+    resp->set_reject(true);
+  }
+  send(std::move(resp));
 }
+
 void Raft::handleConfigChange(pbMessage &m)
 {
-
+  if (m.reject()) {
+    pendingConfigChange_ = false;
+  } else {
+    // use hint_high to store the change type of a ConfigChange
+    uint64_t changeType = static_cast<raftpb::ConfigChangeType>(m.hint_high());
+    // use hint to store the added/removed nodeID
+    uint64_t nodeID = m.hint();
+    switch (changeType) {
+      case raftpb::AddNode: addNode(nodeID);
+      case raftpb::RemoveNode: removeNode(nodeID);
+      case raftpb::AddObserver: addObserver(nodeID);
+      case raftpb::AddWitness: addWitness(nodeID);
+      default:
+        throw Error(errRaftMessage, "unexpected ConfigChangeType={0}", changeType);
+    }
+  }
 }
+
 void Raft::handleLocalTick(pbMessage &m)
 {
-
+  if (m.reject()) {
+    quiescedTick();
+  } else {
+    tick();
+  }
 }
+
 void Raft::handleRestoreRemote(pbMessage &m)
 {
-
+  restoreRemotes(m.snapshot());
 }
+
 void Raft::handleLeaderPropose(pbMessage &m)
 {
 

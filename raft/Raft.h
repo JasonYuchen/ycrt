@@ -121,6 +121,7 @@ class Raft {
   void becomeCandidate();
   void becomeLeader();
   bool restore(const pbSnapshot &s);
+  void restoreRemotes(const pbSnapshot &s);
 
   // election
   void campaign();
