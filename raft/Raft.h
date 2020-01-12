@@ -20,6 +20,8 @@
 #include "ycrt/Config.h"
 #include "server/Event.h"
 
+#include "tests/TestHack.h"
+
 namespace ycrt
 {
 
@@ -82,10 +84,11 @@ class Raft {
   bool timeForInMemoryGC();
   // TODO: bool timeForRateLimitCheck();
   void setRandomizedElectionTimeout();
+  void leaderIsAvailable();
 
   // send
-  void finalizeMessageTerm(pbMessage &m);
   void send(pbMessageUPtr m);
+  void finalizeMessageTerm(pbMessage &m);
   void sendReplicateMessage(uint64_t to);
   void broadcastReplicateMessage();
   void sendHeartbeatMessage(uint64_t to ,pbSystemCtx hint, uint64_t match);
@@ -107,7 +110,7 @@ class Raft {
   // log append and commit
   void sortMatchValues();
   bool tryCommit();
-  void appendEntries(std::vector<pbEntry> &entries);
+  void appendEntries(Span<pbEntry> entries);
 
   // state transition
   void reset(uint64_t term);

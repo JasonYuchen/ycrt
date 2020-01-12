@@ -192,7 +192,7 @@ string Raft::describe()
     log->critical("{0} failed to get term with index={1} due to {2}", cn_, lastIndex, term.Code());
   }
   return fmt::format(
-    "[first={0},last={1},term={2},commit={3},applied={4}] {5} with term {6}",
+    "Raft[first={0},last={1},term={2},commit={3},applied={4}] {5} with term {6}",
     logEntry_->FirstIndex(), lastIndex, term.GetOrDefault(0),
     logEntry_->Committed(), logEntry_->Processed(), cn_, term_);
 }
@@ -352,6 +352,7 @@ Remote *Raft::getRemoteByNodeID(uint64_t nodeID, bool must)
   } else if (must) {
     throw Error(errRemoteState, "can not determine the Remote by nodeID={0}", nodeID);
   }
+  log->info("{0}: remote {1} not found", describe(), nodeID);
   return nullptr;
 }
 
@@ -454,6 +455,19 @@ void Raft::setRandomizedElectionTimeout()
     electionTimeout_ + randomEngine_() % electionTimeout_;
 }
 
+void Raft::leaderIsAvailable()
+{
+  electionTick_ = 0;
+}
+
+void Raft::send(pbMessageUPtr m)
+{
+  assert(m);
+  m->set_from(nodeID_);
+  finalizeMessageTerm(*m);
+  messages_.emplace_back(std::move(m));
+}
+
 void Raft::finalizeMessageTerm(pbMessage &m)
 {
   if (m.term() == 0 && m.type() == raftpb::RequestVote) {
@@ -466,14 +480,6 @@ void Raft::finalizeMessageTerm(pbMessage &m)
   if (!isRequestMessage(m.type())) {
     m.set_term(term_);
   }
-}
-
-void Raft::send(pbMessageUPtr m)
-{
-  assert(m);
-  m->set_from(nodeID_);
-  finalizeMessageTerm(*m);
-  messages_.emplace_back(std::move(m));
 }
 
 void Raft::sendReplicateMessage(uint64_t to)
@@ -687,14 +693,14 @@ bool Raft::tryCommit()
   return logEntry_->TryCommit(q, term_);
 }
 
-void Raft::appendEntries(vector<pbEntry> &entries)
+void Raft::appendEntries(Span<pbEntry> entries)
 {
   uint64_t lastIndex = logEntry_->LastIndex();
   for (auto &entry : entries) {
     entry.set_term(term_);
     entry.set_index(1 + lastIndex++);
   }
-  logEntry_->Append({entries.data(), entries.size()});
+  logEntry_->Append(entries);
   remotes_[nodeID_].TryUpdate(logEntry_->LastIndex());
   if (isSingleNodeQuorum()) {
     tryCommit();
@@ -819,7 +825,7 @@ void Raft::becomeLeader()
   preLeaderPromotionHandleConfigChange();
   vector<pbEntry> null{pbEntry{}};
   null[0].set_type(raftpb::ApplicationEntry);
-  appendEntries(null);
+  appendEntries({null.data(), null.size()});
   log->info("{0}: became a leader", describe());
 }
 
@@ -1349,88 +1355,277 @@ void Raft::handleRestoreRemote(pbMessage &m)
 
 void Raft::handleLeaderPropose(pbMessage &m)
 {
-
+  mustBeOrThrow(Leader);
+  if (isLeaderTransferring()) {
+    log->warn("{0}: dropped a proposal, leader transferring", describe());
+    reportDroppedProposal(m);
+    return;
+  }
+  for (auto &entry : *m.mutable_entries()) {
+    if (entry.type() == raftpb::ConfigChangeEntry) {
+      if (pendingConfigChange_) {
+        log->warn("{0}: dropped an extra ConfigChange", describe());
+        reportDroppedConfigChange(std::move(entry));
+        entry = pbEntry{};
+        entry.set_type(raftpb::ApplicationEntry);
+      }
+      pendingConfigChange_ = true;
+    }
+  }
+  // FIXME
+  vector<pbEntry> ent;
+  for (auto &entry : m.entries()) {
+    ent.emplace_back(entry);
+  }
+  appendEntries({ent.data(), ent.size()});
+  broadcastReplicateMessage();
 }
+
 void Raft::handleLeaderHeartbeat(pbMessage &m)
 {
-
+  mustBeOrThrow(Leader);
+  broadcastHeartbeatMessage();
 }
+
 void Raft::handleLeaderCheckQuorum(pbMessage &m)
 {
-
+  mustBeOrThrow(Leader);
+  if (!leaderHasQuorum()) {
+    log->warn("{0}: lost quorum", describe());
+    becomeFollower(term_, NoLeader);
+  }
 }
+
 bool Raft::hasCommittedEntryAtCurrentTerm()
 {
-  return false;
+  if (term_ == 0) {
+    throw Error(errUnexpectedRaftState, "not supposed to reach here");
+  }
+  StatusWith<uint64_t> lastCommittedTerm = logEntry_->Term(logEntry_->Committed());
+  if (!lastCommittedTerm.IsOK() && lastCommittedTerm.Code() != errLogCompacted) {
+    lastCommittedTerm.IsOKOrThrow();
+  }
+  return lastCommittedTerm.Get() == term_;
 }
+
 void Raft::handleLeaderReadIndex(pbMessage &m)
 {
-
+  mustBeOrThrow(Leader);
+  auto ctx = pbSystemCtx{};
+  ctx.Low = m.hint();
+  ctx.High = m.hint_high();
+  if (witnesses_.find(m.from()) != witnesses_.end()) {
+    log->error("{0}: dropped ReadIndex from witness {1}", describe(), m.from());
+  } else if (!isSingleNodeQuorum()) {
+    if (!hasCommittedEntryAtCurrentTerm()) {
+      // leader doesn't know the commit value of the cluster
+      // see raft thesis section 6.4, this is the first step of the ReadIndex
+      // protocol.
+      log->warn("{0}: dropped ReadIndex, leader is not ready", describe());
+      reportDroppedReadIndex(m);
+      return;
+    }
+    // FIXME: readIndex.addRequest
+    broadcastHeartbeatMessage(ctx);
+  } else {
+    // FIXME: addReadyToRead(logEntry_->Committed(), ctx);
+    if (m.from() != nodeID_ && observers_.find(m.from()) != observers_.end()) {
+      auto resp = make_unique<pbMessage>();
+      resp->set_to(m.from());
+      resp->set_type(raftpb::ReadIndexResp);
+      resp->set_log_index(logEntry_->Committed());
+      resp->set_hint(m.hint());
+      resp->set_hint_high(m.hint_high());
+      resp->set_commit(m.commit());
+      send(std::move(resp));
+    }
+  }
 }
+
 void Raft::handleLeaderReplicateResp(pbMessage &m)
 {
+  mustBeOrThrow(Leader);
+  auto remote = getRemoteByNodeID(m.from(), false);
+  if (!remote) {
+    return;
+  }
+  remote->SetActive(true);
+  if (!m.reject()) {
+    bool paused = remote->IsPaused();
+    if (remote->TryUpdate(m.log_index())) {
+      remote->RespondedTo();
+      if (tryCommit()) {
+        broadcastReplicateMessage();
+      } else if (paused) {
+        sendReplicateMessage(m.from());
+      }
+      // TODO: TO READ: according to the leadership transfer protocol listed on the p29 of the
+      //  raft thesis
+      if (isLeaderTransferring() &&
+        m.from() == leaderTransferTargetID_ &&
+        logEntry_->LastIndex() == remote->Match) {
+        sendTimeoutNowMessage(leaderTransferTargetID_);
+      }
+    }
+  } else {
+    // the replication flow control code is derived from etcd raft, it resets
+    // nextIndex to match + 1. it is thus even more conservative than the raft
+    // thesis's approach of nextIndex = nextIndex - 1 mentioned on the p21 of
+    // the thesis.
+    if (remote->DecreaseTo(m.log_index(), m.hint())) {
+      remote->EnterRetry();
+      sendReplicateMessage(m.from());
+    }
+  }
 
 }
+
 void Raft::handleLeaderHeartbeatResp(pbMessage &m)
 {
-
+  mustBeOrThrow(Leader);
+  auto remote = getRemoteByNodeID(m.from(), false);
+  if (!remote) {
+    return;
+  }
+  remote->SetActive(true);
+  remote->WaitToRetry();
+  if (remote->Match < logEntry_->LastIndex()) {
+    sendReplicateMessage(m.from());
+  }
+  // heartbeat response contains leadership confirmation requested as part of
+  // the ReadIndex protocol.
+  if (m.hint() != 0) {
+    handleReadIndexLeaderConfirmation(m);
+  }
 }
+
 void Raft::handleLeaderLeaderTransfer(pbMessage &m)
 {
-
+  mustBeOrThrow(Leader);
+  auto remote = getRemoteByNodeID(m.from(), false);
+  if (!remote) {
+    return;
+  }
+  // use hint to store the target of the leader transfer request
+  uint64_t target = m.hint();
+  log->info("{0}: LeaderTransfer, target={1}", describe(), target);
+  if (target == NoNode) {
+    throw Error(errRaftMessage, "LeaderTransfer target not set");
+  }
+  if (isLeaderTransferring()) {
+    log->warn("{0}: ignored LeaderTransfer, transfer is ongoing", describe());
+    return;
+  }
+  if (nodeID_ == target) {
+    log->warn("{0}: ignored LeaderTransfer, target is itself", describe());
+    return;
+  }
+  leaderTransferTargetID_ = target;
+  electionTick_ = 0;
+  // fast path below, if the log entry is consistent, timeout now to start election
+  // or wait for the target node to catch up, see p29 of the raft thesis
+  if (remote->Match == logEntry_->LastIndex()) {
+    sendTimeoutNowMessage(target);
+  }
 }
+
 void Raft::handleReadIndexLeaderConfirmation(pbMessage &m)
 {
-
+  auto ctx = pbSystemCtx{};
+  ctx.Low = m.hint();
+  ctx.High = m.hint_high();
+  // FIXME ris := readIndex.confirm(ctx, m.from(), quorum);
 }
+
 void Raft::handleLeaderSnapshotStatus(pbMessage &m)
 {
-
+  auto remote = getRemoteByNodeID(m.from(), false);
+  if (!remote) {
+    return;
+  }
+  if (remote->State != Remote::Snapshot) {
+    return;
+  }
+  if (m.reject()) {
+    remote->ClearPendingSnapshot();
+    log->info("{0}: snapshot failed, remote {1} is now in wait state", describe(), m.from());
+  } else {
+    log->info("{0}: snapshot succeeded, remote {1} is now in wait state, next={2}", describe(), m.from(), remote->Next);
+  }
+  remote->BecomeWait();
 }
+
 void Raft::handleLeaderUnreachable(pbMessage &m)
 {
-
+  if(!getRemoteByNodeID(m.from(), false)) {
+    return;
+  }
+  log->info("{0}: received Unreachable, remote {1} entered retry state", describe(), m.from());
 }
+
+// FIXME handleLeaderRateLimit
+
+
+// re-route observer handler to follower handler
 void Raft::handleObserverPropose(pbMessage &m)
 {
-
+  handleFollowerPropose(m);
 }
+
 void Raft::handleObserverReplicate(pbMessage &m)
 {
-
+  handleFollowerReplicate(m);
 }
+
 void Raft::handleObserverHeartbeat(pbMessage &m)
 {
-
+  handleFollowerHeartbeat(m);
 }
+
 void Raft::handleObserverInstallSnapshot(pbMessage &m)
 {
-
+  handleFollowerInstallSnapshot(m);
 }
+
 void Raft::handleObserverReadIndex(pbMessage &m)
 {
-
+  handleFollowerReadIndex(m);
 }
+
 void Raft::handleObserverReadIndexResp(pbMessage &m)
 {
-
+  handleFollowerReadIndexResp(m);
 }
+
+// re-route witness handler to follower handler
 void Raft::handleWitnessReplicate(pbMessage &m)
 {
-
+  handleFollowerReplicate(m);
 }
+
 void Raft::handleWitnessHeartbeat(pbMessage &m)
 {
-
+  handleFollowerHeartbeat(m);
 }
+
 void Raft::handleWitnessInstallSnapshot(pbMessage &m)
 {
-
+  handleFollowerInstallSnapshot(m);
 }
+
 void Raft::handleFollowerPropose(pbMessage &m)
 {
-
+  if (leaderID_ == NoLeader) {
+    log->warn("{0}: dropped proposal as no available leader", describe());
+    reportDroppedProposal(m);
+  } else {
+    // copy a new message
+    auto resp = make_unique<pbMessage>(m);
+    resp->set_to(leaderID_);
+    send(std::move(resp));
+  }
 }
+
 void Raft::handleFollowerReplicate(pbMessage &m)
 {
 
