@@ -6,6 +6,7 @@
 #define YCRT_RAFT_REMOTE_H_
 
 #include <stdint.h>
+#include <spdlog/fmt/ostr.h>
 
 namespace ycrt
 {
@@ -32,6 +33,7 @@ struct Remote {
   void SetActive(bool active);
   void RetryToWait();
   void WaitToRetry();
+  void EnterRetry();
 
   bool Active = false;
   enum State State = Retry;
@@ -41,6 +43,18 @@ struct Remote {
 };
 
 const char *StateToString(enum Remote::State state);
+
+// for spdlog
+template<typename os>
+os &operator<<(os &o, const ycrt::raft::Remote &r)
+{
+  return o << "Remote"
+    "[Active=" << r.Active <<
+    ",State=" << StateToString(r.State) <<
+    ",Match=" << r.Match <<
+    ",Next=" << r.Next <<
+    ",SnapshotIndex=" << r.SnapshotIndex << "]";
+}
 
 } // namespace raft
 

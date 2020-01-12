@@ -137,6 +137,13 @@ void Remote::WaitToRetry()
   }
 }
 
+void Remote::EnterRetry()
+{
+  if (State == Replicate) {
+    BecomeRetry();
+  }
+}
+
 
 const char *StateToString(enum Remote::State state)
 {

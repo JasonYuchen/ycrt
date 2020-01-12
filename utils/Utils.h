@@ -39,6 +39,23 @@ class Span {
  public:
   Span(T *start, size_t len) : start_(start), len_(len) {}
   DEFAULT_COPY_MOVE_AND_ASSIGN(Span);
+  explicit Span(std::vector<T> &data) : start_(data.data()), len_(data.size()) {}
+  T *begin()
+  {
+    return start_;
+  }
+  const T *cbegin() const
+  {
+    return start_;
+  }
+  T *end()
+  {
+    return start_ + len_;
+  }
+  const T *cend()
+  {
+    return start_ + len_;
+  }
   size_t size()
   {
     return len_;
