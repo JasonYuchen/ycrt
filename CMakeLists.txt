@@ -32,7 +32,7 @@ target_link_libraries(ycrt_static
 set_target_properties(ycrt_static PROPERTIES OUTPUT_NAME "ycrt")
 
 if (UnitTest)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -DGTEST")
     include(GoogleTest)
     link_libraries(gtest gtest_main)
     add_executable(ycrt_test ${SOURCE})
