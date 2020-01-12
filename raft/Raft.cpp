@@ -1261,6 +1261,18 @@ bool Raft::onMessageTermNotMatched(pbMessage &m)
     }
   } else if (m.term() < term_) {
     if (isLeaderMessage(m.type()) && checkQuorum_) {
+      // this corner case is documented in the following etcd test
+      // TestFreeStuckCandidateWithCheckQuorum
+      //
+      // When network partition recovers, the isolated node(C) with higher term
+      // rejoins the cluster, the other nodes(A, B) will ignore the RequestVote
+      // message from C due to the existing leader(A).
+      // Then A will send messages to the C which triggers C sending the NoOP
+      // The A receives the NoOP with higher term and then steps down to
+      // follower waiting for a next election.
+      // But C (if timeouts and become candidate) lost some log entries so A, B
+      // will not cast votes.
+      // Then one of the A, B timeouts, start a new election and win
       auto resp = make_unique<pbMessage>();
       resp->set_to(m.from());
       resp->set_type(raftpb::NoOP);
