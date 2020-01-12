@@ -104,7 +104,9 @@ void Raft::Handle(pbMessage &m)
 {
   if (!onMessageTermNotMatched(m)) {
     assert(m.term() == 0 || m.term() == term_);
-    (this->*handlers_[state_][m.type()])(m);
+    if(handlers_[state_][m.type()]) {
+      (this->*handlers_[state_][m.type()])(m);
+    }
   } else {
     log->info("dropped a {0} from {1}, term not matched", m.type(), m.from());
   }
@@ -926,7 +928,7 @@ void Raft::campaign()
     becomeLeader();
     return;
   }
-  uint64_t hint = 0;
+  uint64_t hint = NoNode;
   // if current node is the target node of the leader transfer
   if (isLeaderTransferTarget_) {
     hint = nodeID_;
@@ -1619,7 +1621,7 @@ void Raft::handleFollowerPropose(pbMessage &m)
     log->warn("{0}: dropped proposal as no available leader", describe());
     reportDroppedProposal(m);
   } else {
-    // copy a new message
+    // FIXME: do not copy
     auto resp = make_unique<pbMessage>(m);
     resp->set_to(leaderID_);
     send(std::move(resp));
@@ -1628,55 +1630,123 @@ void Raft::handleFollowerPropose(pbMessage &m)
 
 void Raft::handleFollowerReplicate(pbMessage &m)
 {
-
+  leaderIsAvailable();
+  setLeaderID(m.from());
+  handleReplicate(m);
 }
+
 void Raft::handleFollowerHeartbeat(pbMessage &m)
 {
-
+  leaderIsAvailable();
+  setLeaderID(m.from());
+  handleHeartbeat(m);
 }
+
 void Raft::handleFollowerReadIndex(pbMessage &m)
 {
-
+  if (leaderID_ == NoLeader) {
+    log->warn("{0}: dropped ReadIndex as no available leader", describe());
+    reportDroppedReadIndex(m);
+  } else {
+    // FIXME: do not copy
+    auto resp = make_unique<pbMessage>(m);
+    resp->set_to(leaderID_);
+    send(std::move(resp));
+  }
 }
+
 void Raft::handleFollowerLeaderTransfer(pbMessage &m)
 {
-
+  if (leaderID_ == NoLeader) {
+    log->warn("{0}: dropped LeadTransfer as no available leader", describe());
+  } else {
+    // FIXME: do not copy
+    auto resp = make_unique<pbMessage>(m);
+    resp->set_to(leaderID_);
+    send(std::move(resp));
+  }
 }
+
 void Raft::handleFollowerReadIndexResp(pbMessage &m)
 {
-
+  auto ctx = pbSystemCtx{};
+  ctx.Low = m.hint();
+  ctx.High = m.hint_high();
+  leaderIsAvailable();
+  setLeaderID(m.from());
+  // FIXME: add ready to read
 }
+
 void Raft::handleFollowerInstallSnapshot(pbMessage &m)
 {
-
+  leaderIsAvailable();
+  setLeaderID(m.from());
+  handleInstallSnapshot(m);
 }
+
 void Raft::handleFollowerTimeoutNow(pbMessage &m)
 {
-
+  // the last paragraph, p29 of the raft thesis mentions that this is nothing
+  // different from the clock moving forward quickly
+  log->info("{0}: TimeoutNow received", describe());
+  electionTick_ = randomizedElectionTimeout_;
+  isLeaderTransferTarget_ = true;
+  tick();
+  if (isLeaderTransferTarget_) {
+    isLeaderTransferTarget_ = false;
+  }
 }
+
 void Raft::handleCandidatePropose(pbMessage &m)
 {
-
+  log->warn("{0}: dropped proposal as no available leader", describe());
+  reportDroppedProposal(m);
 }
+
+// implies that there is a leader for current term == m.term()
 void Raft::handleCandidateReplicate(pbMessage &m)
 {
-
+  becomeFollower(term_, m.from());
+  handleReplicate(m);
 }
+
+// implies that there is a leader for current term == m.term()
 void Raft::handleCandidateHeartbeat(pbMessage &m)
 {
-
+  becomeFollower(term_, m.from());
+  handleHeartbeat(m);
 }
+
 void Raft::handleCandidateReadIndex(pbMessage &m)
 {
-
+  log->warn("{0}: dropped ReadIndex as no available leader", describe());
+  reportDroppedReadIndex(m);
+  droppedReadIndexes_.emplace_back(pbSystemCtx{m.hint(), m.hint_high()});
 }
+
+// implies that there is a leader for current term == m.term()
 void Raft::handleCandidateInstallSnapshot(pbMessage &m)
 {
-
+  becomeFollower(term_, m.from());
+  handleInstallSnapshot(m);
 }
+
 void Raft::handleCandidateRequestVoteResp(pbMessage &m)
 {
-
+  if (observers_.find(m.from()) != observers_.end()) {
+    log->warn("{0}: dropped RequestVoteResp from observer {1}", m.from());
+    return;
+  }
+  uint64_t count = handleVoteResp(m.from(), m.reject());
+  log->info("{0}: received {1} votes and {2} rejections, quorum is {3}", describe(), count, votes_.size() - count, quorum());
+  // 3rd paragraph section 5.2 of the raft paper
+  if (count == quorum()) {
+    becomeLeader();
+    broadcastReplicateMessage();
+  } else if (votes_.size() - count == quorum()) {
+    // etcd raft does this, it is not stated in the raft paper
+    becomeFollower(term_, NoLeader);
+  }
 }
 
 } // namespace raft
