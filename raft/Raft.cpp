@@ -36,7 +36,7 @@ Raft::Raft(ConfigSPtr &config, LogDBSPtr &logdb)
     messages_(),
     matched_(),
     logEntry_(new LogEntry(logdb)),
-    //readIndex_(),
+    readIndex_(),
     readyToRead_(),
     droppedEntries_(),
     droppedReadIndexes_(),
@@ -489,8 +489,8 @@ void Raft::sendReplicateMessage(uint64_t to)
       return;
     }
     m = makeInstallSnapshotMessage(to);
-    // FIXME
-    log->info("{0}: start sending snapshot ", describe());
+    // FIXME: error msg?
+    log->info("{0}: start sending snapshot with index={1} to {2}", describe(), m->snapshot().index(), *remote);
     remote->BecomeSnapshot(m->snapshot().index());
   } else {
     if (!m->entries().empty()) {
@@ -523,12 +523,16 @@ void Raft::sendHeartbeatMessage(uint64_t to, pbSystemCtx hint, uint64_t match)
 void Raft::broadcastHeartbeatMessage()
 {
   mustBeOrThrow(Leader);
-  // FIXME: ReadIndex
+  if (readIndex_.HasPendingRequest()) {
+    broadcastHeartbeatMessage(readIndex_.BackCtx());
+  } else {
+    broadcastHeartbeatMessage({0, 0});
+  }
 }
 
 void Raft::broadcastHeartbeatMessage(pbSystemCtx hint)
 {
-  auto zeroHint = pbSystemCtx{.Low = 0, .High = 0};
+  auto zeroHint = pbSystemCtx{0, 0};
   for (auto &node : getVotingMembers()) {
     if (node.first != nodeID_) {
       sendHeartbeatMessage(node.first, hint, node.second.Match());
@@ -593,7 +597,7 @@ pbMessageUPtr Raft::makeReplicateMessage(
     auto meta = makeMetadataEntries(entries.Get());
     std::swap(entries.GetMutable(), meta);
   }
-  // FIXME
+  // TODO: performance?
   auto m = make_unique<pbMessage>();
   m->set_to(to);
   m->set_type(raftpb::Replicate);
@@ -712,7 +716,7 @@ void Raft::reset(uint64_t term)
   electionTick_ = 0;
   heartbeatTick_ = 0;
   setRandomizedElectionTimeout();
-  // FIXME readIndex
+  readIndex_.Clear();
   pendingConfigChange_ = false;
   abortLeaderTransfer();
   resetRemotes();
@@ -1372,7 +1376,7 @@ void Raft::handleLeaderPropose(pbMessage &m)
       pendingConfigChange_ = true;
     }
   }
-  // FIXME
+  // FIXME: remove ent
   vector<pbEntry> ent;
   for (auto &entry : m.entries()) {
     ent.emplace_back(entry);
@@ -1425,10 +1429,10 @@ void Raft::handleLeaderReadIndex(pbMessage &m)
       reportDroppedReadIndex(m);
       return;
     }
-    // FIXME: readIndex.addRequest
+    readIndex_.AddRequest(logEntry_->Committed(), ctx, m.from());
     broadcastHeartbeatMessage(ctx);
   } else {
-    // FIXME: addReadyToRead(logEntry_->Committed(), ctx);
+    readyToRead_.emplace_back(pbReadyToRead{logEntry_->Committed(), ctx});
     if (m.from() != nodeID_ && observers_.find(m.from()) != observers_.end()) {
       auto resp = make_unique<pbMessage>();
       resp->set_to(m.from());
@@ -1495,7 +1499,7 @@ void Raft::handleLeaderHeartbeatResp(pbMessage &m)
   // heartbeat response contains leadership confirmation requested as part of
   // the ReadIndex protocol.
   if (m.hint() != 0) {
-    handleReadIndexLeaderConfirmation(m);
+    handleLeaderReadIndexConfirmation(m);
   }
 }
 
@@ -1529,12 +1533,25 @@ void Raft::handleLeaderLeaderTransfer(pbMessage &m)
   }
 }
 
-void Raft::handleReadIndexLeaderConfirmation(pbMessage &m)
+void Raft::handleLeaderReadIndexConfirmation(pbMessage &m)
 {
   auto ctx = pbSystemCtx{};
   ctx.Low = m.hint();
   ctx.High = m.hint_high();
-  // FIXME ris := readIndex.confirm(ctx, m.from(), quorum);
+  vector<ReadStatus> readStatus = readIndex_.Confirm(ctx, m.from(), quorum());
+  for (auto &s : readStatus) {
+    if (s.From == NoNode || s.From == nodeID_) {
+      readyToRead_.emplace_back(pbReadyToRead{s.Index, s.Ctx});
+    } else {
+      auto resp = make_unique<pbMessage>();
+      resp->set_to(s.From);
+      resp->set_type(raftpb::ReadIndexResp);
+      resp->set_log_index(s.Index);
+      resp->set_hint(m.hint());
+      resp->set_hint_high(m.hint_high());
+      send(std::move(resp));
+    }
+  }
 }
 
 void Raft::handleLeaderSnapshotStatus(pbMessage &m)
@@ -1672,7 +1689,7 @@ void Raft::handleFollowerReadIndexResp(pbMessage &m)
   ctx.High = m.hint_high();
   leaderIsAvailable();
   setLeaderID(m.from());
-  // FIXME: add ready to read
+  readyToRead_.emplace_back(pbReadyToRead{m.log_index(), ctx});
 }
 
 void Raft::handleFollowerInstallSnapshot(pbMessage &m)

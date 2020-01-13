@@ -165,12 +165,11 @@ class Raft {
   void handleLeaderHeartbeat(pbMessage &m);
   void handleLeaderCheckQuorum(pbMessage &m);
   bool hasCommittedEntryAtCurrentTerm();
-  // TODO: addReadyToread
   void handleLeaderReadIndex(pbMessage &m);
   void handleLeaderReplicateResp(pbMessage &m);
   void handleLeaderHeartbeatResp(pbMessage &m);
   void handleLeaderLeaderTransfer(pbMessage &m);
-  void handleReadIndexLeaderConfirmation(pbMessage &m);
+  void handleLeaderReadIndexConfirmation(pbMessage &m);
   void handleLeaderSnapshotStatus(pbMessage &m);
   void handleLeaderUnreachable(pbMessage &m);
 
@@ -224,7 +223,7 @@ class Raft {
   std::vector<pbMessageUPtr> messages_;
   std::vector<uint64_t> matched_;
   LogEntrySPtr logEntry_;
-  // ReadIndexSPtr readIndex_;
+  ReadIndex readIndex_;
   std::vector<pbReadyToRead> readyToRead_;
   std::vector<pbEntry> droppedEntries_;
   std::vector<pbSystemCtx> droppedReadIndexes_;
