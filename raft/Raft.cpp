@@ -16,14 +16,6 @@ namespace raft
 
 using namespace std;
 
-const char *StateToString(enum Raft::State state)
-{
-  static const char *states[] =
-    {"Follower", "PreCandidate", "Candidate", "Leader", "Observer", "Witness"};
-  assert(state < Raft::NumOfState);
-  return states[state];
-}
-
 Raft::Raft(ConfigSPtr &config, LogDBSPtr &logdb)
   : log(Log.GetLogger("raft")),
     clusterID_(config->ClusterID),
@@ -64,15 +56,15 @@ Raft::Raft(ConfigSPtr &config, LogDBSPtr &logdb)
   pair<pbStateSPtr, pbMembershipSPtr> nodeState = logdb->NodeState();
   for (auto &node : nodeState.second->addresses()) {
     remotes_.insert({node.first, Remote{}});
-    remotes_[node.first].Next = 1;
+    remotes_[node.first].SetNext(1);
   }
   for (auto &node : nodeState.second->observers()) {
     observers_.insert({node.first, Remote{}});
-    observers_[node.first].Next = 1;
+    observers_[node.first].SetNext(1);
   }
   for (auto &node : nodeState.second->witnesses()) {
     witnesses_.insert({node.first, Remote{}});
-    witnesses_[node.first].Next = 1;
+    witnesses_[node.first].SetNext(1);
   }
   resetMatchValueArray();
   if (!(nodeState.first == nullptr)) {
@@ -300,7 +292,7 @@ bool Raft::leaderHasQuorum()
 {
   uint64_t count = 0;
   for (auto &node : getVotingMembers()) {
-    if (node.first == nodeID_ || node.second.IsActive()) {
+    if (node.first == nodeID_ || node.second.Active()) {
       count++;
       node.second.SetActive(false);
     }
@@ -490,9 +482,9 @@ void Raft::sendReplicateMessage(uint64_t to)
   if (remote->IsPaused()) {
     return;
   }
-  auto m = makeReplicateMessage(to, remote->Next, maxEntrySize_);
+  auto m = makeReplicateMessage(to, remote->Next(), maxEntrySize_);
   if (m == nullptr) { // log compaction or other error
-    if (!remote->IsActive()) {
+    if (!remote->Active()) {
       log->warn("{0}: Remote={1} is not active, skip sending snapshot", describe(), to);
       return;
     }
@@ -539,12 +531,12 @@ void Raft::broadcastHeartbeatMessage(pbSystemCtx hint)
   auto zeroHint = pbSystemCtx{.Low = 0, .High = 0};
   for (auto &node : getVotingMembers()) {
     if (node.first != nodeID_) {
-      sendHeartbeatMessage(node.first, hint, node.second.Match);
+      sendHeartbeatMessage(node.first, hint, node.second.Match());
     }
   }
   if (hint == zeroHint) {
     for (auto &node : observers_) {
-      sendHeartbeatMessage(node.first, hint, node.second.Match);
+      sendHeartbeatMessage(node.first, hint, node.second.Match());
     }
   }
 }
@@ -684,10 +676,10 @@ bool Raft::tryCommit()
   }
   size_t index = 0;
   for (auto &node : remotes_) {
-    matched_[index++] = node.second.Match;
+    matched_[index++] = node.second.Match();
   }
   for (auto &node : witnesses_) {
-    matched_[index++] = node.second.Match;
+    matched_[index++] = node.second.Match();
   }
   sortMatchValues();
   // commit as large index as possible
@@ -733,9 +725,9 @@ void Raft::resetRemotes()
 {
   for (auto &node : remotes_) {
     node.second = Remote{};
-    node.second.Next = logEntry_->LastIndex() + 1;
+    node.second.SetNext(logEntry_->LastIndex() + 1);
     if (node.first == nodeID_) {
-      node.second.Match = logEntry_->LastIndex();
+      node.second.SetMatch(logEntry_->LastIndex());
     }
   }
 }
@@ -744,9 +736,9 @@ void Raft::resetObservers()
 {
   for (auto &node : observers_) {
     node.second = Remote{};
-    node.second.Next = logEntry_->LastIndex() + 1;
+    node.second.SetNext(logEntry_->LastIndex() + 1);
     if (node.first == nodeID_) {
-      node.second.Match = logEntry_->LastIndex();
+      node.second.SetMatch(logEntry_->LastIndex());
     }
   }
 }
@@ -755,9 +747,9 @@ void Raft::resetWitnesses()
 {
   for (auto &node : witnesses_) {
     node.second = Remote{};
-    node.second.Next = logEntry_->LastIndex() + 1;
+    node.second.SetNext(logEntry_->LastIndex() + 1);
     if (node.first == nodeID_) {
-      node.second.Match = logEntry_->LastIndex();
+      node.second.SetMatch(logEntry_->LastIndex());
     }
   }
 }
@@ -1060,27 +1052,21 @@ void Raft::removeNode(uint64_t nodeID)
 void Raft::setRemote(uint64_t nodeID, uint64_t match, uint64_t next)
 {
   log->info("{0}: set remote, Node={1}, Match={2}, Next={3}", describe(), nodeID, match, next);
-  auto remote = Remote{};
-  remote.Match = match;
-  remote.Next = next;
+  auto remote = Remote{}.SetMatch(match).SetNext(next);
   remotes_.insert({nodeID, remote});
 }
 
 void Raft::setObserver(uint64_t nodeID, uint64_t match, uint64_t next)
 {
   log->info("{0}: set observer, Node={1}, Match={2}, Next={3}", describe(), nodeID, match, next);
-  auto remote = Remote{};
-  remote.Match = match;
-  remote.Next = next;
+  auto remote = Remote{}.SetMatch(match).SetNext(next);
   observers_.insert({nodeID, remote});
 }
 
 void Raft::setWitness(uint64_t nodeID, uint64_t match, uint64_t next)
 {
   log->info("{0}: set witness, Node={1}, Match={2}, Next={3}", describe(), nodeID, match, next);
-  auto remote = Remote{};
-  remote.Match = match;
-  remote.Next = next;
+  auto remote = Remote{}.SetMatch(match).SetNext(next);
   witnesses_.insert({nodeID, remote});
 }
 
@@ -1477,7 +1463,7 @@ void Raft::handleLeaderReplicateResp(pbMessage &m)
       //  raft thesis
       if (isLeaderTransferring() &&
         m.from() == leaderTransferTargetID_ &&
-        logEntry_->LastIndex() == remote->Match) {
+        logEntry_->LastIndex() == remote->Match()) {
         sendTimeoutNowMessage(leaderTransferTargetID_);
       }
     }
@@ -1503,7 +1489,7 @@ void Raft::handleLeaderHeartbeatResp(pbMessage &m)
   }
   remote->SetActive(true);
   remote->WaitToRetry();
-  if (remote->Match < logEntry_->LastIndex()) {
+  if (remote->Match() < logEntry_->LastIndex()) {
     sendReplicateMessage(m.from());
   }
   // heartbeat response contains leadership confirmation requested as part of
@@ -1538,7 +1524,7 @@ void Raft::handleLeaderLeaderTransfer(pbMessage &m)
   electionTick_ = 0;
   // fast path below, if the log entry is consistent, timeout now to start election
   // or wait for the target node to catch up, see p29 of the raft thesis
-  if (remote->Match == logEntry_->LastIndex()) {
+  if (remote->Match() == logEntry_->LastIndex()) {
     sendTimeoutNowMessage(target);
   }
 }
@@ -1557,14 +1543,14 @@ void Raft::handleLeaderSnapshotStatus(pbMessage &m)
   if (!remote) {
     return;
   }
-  if (remote->State != Remote::Snapshot) {
+  if (remote->State() != Remote::Snapshot) {
     return;
   }
   if (m.reject()) {
     remote->ClearPendingSnapshot();
     log->info("{0}: snapshot failed, remote {1} is now in wait state", describe(), m.from());
   } else {
-    log->info("{0}: snapshot succeeded, remote {1} is now in wait state, next={2}", describe(), m.from(), remote->Next);
+    log->info("{0}: snapshot succeeded, remote {1} is now in wait state, next={2}", describe(), m.from(), remote->Next());
   }
   remote->BecomeWait();
 }
