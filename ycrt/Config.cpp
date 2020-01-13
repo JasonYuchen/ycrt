@@ -13,13 +13,14 @@ namespace ycrt
 void Config::Validate()
 {
   if (NodeID == 0) {
-    throw Error(errInvalidConfig, "NodeID must be > 0");
+    throw Error(ErrorCode::InvalidConfig, "NodeID must be > 0");
   }
   if (HeartbeatRTT == 0) {
-    throw Error(errInvalidConfig, "HeartbeatRTT must be > 0");
+    throw Error(ErrorCode::InvalidConfig, "HeartbeatRTT must be > 0");
   }
   if (ElectionRTT <= 2 * HeartbeatRTT) {
-    throw Error(errInvalidConfig, "ElectionRTT must be > 2 * HeartbeatRTT");
+    throw Error(ErrorCode::InvalidConfig,
+      "ElectionRTT must be > 2 * HeartbeatRTT");
   }
   if (ElectionRTT < 10 * HeartbeatRTT) {
     Log.GetLogger("config")->warn(
@@ -27,31 +28,31 @@ void Config::Validate()
       ElectionRTT, HeartbeatRTT);
   }
   if (MaxInMemLogSize <= settings::EntryNonCmdSize) {
-    throw Error(errInvalidConfig,
+    throw Error(ErrorCode::InvalidConfig,
       "MaxInMemLogSize must be > settings::EntryNonCmdSize");
   }
   if (SnapshotCompressionType != Snappy
     && SnapshotCompressionType != NoCompression) {
-    throw Error(errInvalidConfig,
+    throw Error(ErrorCode::InvalidConfig,
       "SnapshotCompressionType must be Snappy or NoCompression");
   }
   if (EntryCompressionType != Snappy
     && EntryCompressionType != NoCompression) {
-    throw Error(errInvalidConfig,
+    throw Error(ErrorCode::InvalidConfig,
       "EntryCompressionType must be Snappy or NoCompression");
   }
   if (IsWitness && SnapshotEntries > 0) {
-    throw Error(errInvalidConfig, "Witness node can not take snapshot");
+    throw Error(ErrorCode::InvalidConfig, "Witness node can not take snapshot");
   }
   if (IsWitness && IsObserver) {
-    throw Error(errInvalidConfig, "Node can not be both witness and observer");
+    throw Error(ErrorCode::InvalidConfig, "Node can not be both witness and observer");
   }
 }
 
 void NodeHostConfig::Validate()
 {
   if (RTTMillisecond == 0) {
-    throw Error(errInvalidConfig, "RTTMillisecond must be > 0");
+    throw Error(ErrorCode::InvalidConfig, "RTTMillisecond must be > 0");
   }
 // FIXME
 //  if (!isValidAddress(RaftAddress)) {
@@ -71,21 +72,21 @@ void NodeHostConfig::Validate()
   }
   if (MutualTLS) {
     if (CAFile.empty()) {
-      throw Error(errInvalidConfig, "CAFile not specified");
+      throw Error(ErrorCode::InvalidConfig, "CAFile not specified");
     }
     if (CertFile.empty()) {
-      throw Error(errInvalidConfig, "CertFile not specified");
+      throw Error(ErrorCode::InvalidConfig, "CertFile not specified");
     }
     if (KeyFile.empty()) {
-      throw Error(errInvalidConfig, "KeyFile not specified");
+      throw Error(ErrorCode::InvalidConfig, "KeyFile not specified");
     }
   }
   if (MaxSendQueueSize <= settings::EntryNonCmdSize) {
-    throw Error(errInvalidConfig,
+    throw Error(ErrorCode::InvalidConfig,
       "MaxSendQueueSize must be > settings::EntryNonCmdSize");
   }
   if (MaxReceiveQueueSize <= settings::EntryNonCmdSize) {
-    throw Error(errInvalidConfig,
+    throw Error(ErrorCode::InvalidConfig,
       "MaxReceiveQueueSize must be > settings::EntryNonCmdSize");
   }
 }

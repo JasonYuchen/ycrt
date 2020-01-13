@@ -41,10 +41,10 @@ class ReadIndex {
     if (!queue_.empty()) {
       auto it = pending_.find(queue_.back());
       if (it == pending_.end()) {
-        throw Error(errInvalidReadIndex, "inconsistent pending and queue");
+        throw Error(ErrorCode::InvalidReadIndex, "inconsistent pending and queue");
       }
       if (index < it->second.Index) {
-        throw Error(errInvalidReadIndex, "index moved backward in ReadIndex {0}:{1}", index, it->second.Index);
+        throw Error(ErrorCode::InvalidReadIndex, "index moved backward in ReadIndex {0}:{1}", index, it->second.Index);
       }
     }
     queue_.emplace_back(ctx);
@@ -66,13 +66,13 @@ class ReadIndex {
       done++;
       auto status = pending_.find(qCtx);
       if (status == pending_.end()) {
-        throw Error(errInvalidReadIndex, "inconsistent pending and queue");
+        throw Error(ErrorCode::InvalidReadIndex, "inconsistent pending and queue");
       }
       confirm.emplace_back(status->second);
       if (qCtx == ctx) {
         for (auto &cCtx : confirm) {
           if (cCtx.Index > status->second.Index) {
-            throw Error(errInvalidReadIndex, "unexpected index");
+            throw Error(ErrorCode::InvalidReadIndex, "unexpected index");
           }
           cCtx.Index = status->second.Index;
         }
@@ -81,7 +81,7 @@ class ReadIndex {
           pending_.erase(cCtx.Ctx);
         }
         if (queue_.size() != pending_.size()) {
-          throw Error(errInvalidReadIndex, "inconsistent pending and queue");
+          throw Error(ErrorCode::InvalidReadIndex, "inconsistent pending and queue");
         }
         return confirm;
       }

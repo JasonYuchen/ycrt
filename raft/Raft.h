@@ -43,7 +43,7 @@ class Raft {
     bool IsLeader() { return NodeState == Leader; }
     bool IsFollower() { return NodeState == Follower; }
   };
-  Raft(ConfigSPtr &config, LogDBSPtr &logdb);
+  Raft(ConfigSPtr &config, LogDBUPtr logdb);
   Status GetLocalStatus();
   void Handle(pbMessage &&m);
   void Handle(pbMessage &m);
@@ -222,7 +222,7 @@ class Raft {
   std::unordered_map<uint64_t, Remote> witnesses_;
   std::vector<pbMessageUPtr> messages_;
   std::vector<uint64_t> matched_;
-  LogEntrySPtr logEntry_;
+  LogEntryUPtr logEntry_;
   ReadIndex readIndex_;
   std::vector<pbReadyToRead> readyToRead_;
   std::vector<pbEntry> droppedEntries_;

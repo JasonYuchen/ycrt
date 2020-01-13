@@ -12,22 +12,22 @@
 namespace ycrt
 {
 
-enum ErrorCode : uint32_t {
+enum class ErrorCode : uint32_t {
   OK = 0,
-  errInvalidConfig,
-  errBatchSendSkipped,
-  errChunkSendSkipped,
-  errRemoteState,
-  errOutOfRange,
-  errLogCompacted,
-  errLogUnavailable,
-  errSnapshotUnavailable,
-  errUnexpectedRaftState,
-  errRaftMessage,
-  errLogMismatch,
-  errEmptySnapshot,
-  errInvalidReadIndex,
-  errOther
+  //
+  InvalidConfig,
+  BatchSendSkipped,
+  ChunkSendSkipped,
+  RemoteState,
+  OutOfRange,
+  LogCompacted,
+  LogUnavailable,
+  LogMismatch,
+  SnapshotUnavailable,
+  UnexpectedRaftState,
+  UnexpectedRaftMessage,
+  InvalidReadIndex,
+  Other,
 };
 
 // maybe recoverable
@@ -48,12 +48,12 @@ class Error : public std::runtime_error {
 
 class Status {
  public:
-  Status() : error_(OK) {}
+  Status() : error_(ErrorCode::OK) {}
   explicit Status(ErrorCode error) : error_(error) {}
   DEFAULT_COPY_MOVE_AND_ASSIGN(Status);
 
   ErrorCode Code() const { return error_; }
-  bool IsOK() const { return error_ == OK; }
+  bool IsOK() const { return error_ == ErrorCode::OK; }
  private:
   ErrorCode error_;
 };
@@ -71,39 +71,37 @@ inline bool operator==(const Status &lhs, ErrorCode rhs)
 template<typename Result>
 class StatusWith {
  public:
-  explicit StatusWith(const Result &r) : result_(r), error_(OK) {}
-  explicit StatusWith(Result &&r) : result_(std::move(r)), error_(OK) {}
-  explicit StatusWith(ErrorCode error) : result_(), error_(error) {}
+  StatusWith(const Result &r) : result_(r), error_(ErrorCode::OK) {}
+  StatusWith(Result &&r) : result_(std::move(r)), error_(ErrorCode::OK) {}
+  StatusWith(ErrorCode error) : result_(), error_(error) {}
   DEFAULT_COPY_MOVE_AND_ASSIGN(StatusWith);
 
   ErrorCode Code() const { return error_; }
-  bool IsOK() const { return error_ == OK; }
+  bool IsOK() const { return error_ == ErrorCode::OK; }
   bool IsOKOrThrow()
   {
-    if (error_ != OK) {
+    if (error_ != ErrorCode::OK) {
       throw Error(error_);
     }
     return true;
   }
-  const Result &Get() const { return result_; }
-  Result &GetMutable() { return result_; }
-  const Result &GetOrThrow() const
+  const Result &Get() const
   {
-    if (error_ != OK) {
+    if (!IsOK()) {
       throw Error(error_);
     }
     return result_;
   }
-  Result &GetMutableOrThrow()
+  Result &GetMutable()
   {
-    if (error_ != OK) {
+    if (!IsOK()) {
       throw Error(error_);
     }
     return result_;
   }
   Result GetOrDefault(const Result &r)
   {
-    if (error_ != OK) {
+    if (error_ != ErrorCode::OK) {
       return r;
     } else {
       return result_;
@@ -111,7 +109,7 @@ class StatusWith {
   }
   Result GetOrDefault(Result &&r)
   {
-    if (error_ != OK) {
+    if (error_ != ErrorCode::OK) {
       return r;
     } else {
       return result_;

@@ -81,7 +81,7 @@ class Span {
   Span SubSpan(size_t index, size_t len)
   {
     if (index + len > len_) {
-      throw Error(errOutOfRange);
+      throw Error(ErrorCode::OutOfRange);
     }
     return Span(start_ + index, len);
   }

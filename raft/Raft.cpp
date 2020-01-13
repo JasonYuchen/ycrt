@@ -16,7 +16,7 @@ namespace raft
 
 using namespace std;
 
-Raft::Raft(ConfigSPtr &config, LogDBSPtr &logdb)
+Raft::Raft(ConfigSPtr &config, LogDBUPtr logdb)
   : log(Log.GetLogger("raft")),
     clusterID_(config->ClusterID),
     nodeID_(config->NodeID),
@@ -35,7 +35,7 @@ Raft::Raft(ConfigSPtr &config, LogDBSPtr &logdb)
     witnesses_(),
     messages_(),
     matched_(),
-    logEntry_(new LogEntry(logdb)),
+    logEntry_(new LogEntry(std::move(logdb))),
     readIndex_(),
     readyToRead_(),
     droppedEntries_(),
@@ -197,7 +197,7 @@ void Raft::loadState(const pbStateSPtr &state)
     || state->commit() > logEntry_->LastIndex()) {
     log->critical("loadState: state out of range, commit={0}, range=[{1},{2}]",
       state->commit(), logEntry_->Committed(), logEntry_->LastIndex());
-    throw Error(errOutOfRange, "state out of range");
+    throw Error(ErrorCode::OutOfRange, "state out of range");
   }
   logEntry_->SetCommitted(state->commit());
   term_ = state->term();
@@ -251,7 +251,7 @@ void Raft::mustBeOrThrow(State state)
 {
   if (state_ != state) {
     log->critical("{0} is not a {1}", describe(), StateToString(state));
-    throw Error(errUnexpectedRaftState);
+    throw Error(ErrorCode::UnexpectedRaftState);
   }
 }
 
@@ -259,7 +259,7 @@ void Raft::mustNotBeOrThrow(State state)
 {
   if (state_ == state) {
     log->critical("{0} is a {1}", describe(), StateToString(state));
-    throw Error(errUnexpectedRaftState);
+    throw Error(ErrorCode::UnexpectedRaftState);
   }
 }
 
@@ -344,7 +344,7 @@ Remote *Raft::getRemoteByNodeID(uint64_t nodeID, bool must)
   } else if (witnesses_.find(nodeID) != witnesses_.end()) {
     return &witnesses_[nodeID];
   } else if (must) {
-    throw Error(errRemoteState, "can not determine the Remote by nodeID={0}", nodeID);
+    throw Error(ErrorCode::RemoteState, "can not determine the Remote by nodeID={0}", nodeID);
   }
   log->info("{0}: remote {1} not found", describe(), nodeID);
   return nullptr;
@@ -466,7 +466,7 @@ void Raft::finalizeMessageTerm(pbMessage &m)
 {
   if (m.term() == 0 && m.type() == raftpb::RequestVote) {
     log->critical("{0}: sending a RequestVote with 0 term", describe());
-    throw Error(errRaftMessage);
+    throw Error(ErrorCode::UnexpectedRaftMessage);
   }
   if (m.term() > 0 && m.type() != raftpb::RequestVote) {
     log->critical("{0}: term is unexpectedly set for message {1}", describe(), m.DebugString());
@@ -561,7 +561,7 @@ pbMessageUPtr Raft::makeInstallSnapshotMessage(uint64_t to)
   pbSnapshotUPtr snapshot = logEntry_->GetSnapshot();
   if (snapshot == nullptr) {
     log->critical("{0}: got an empty snapshot", describe());
-    throw Error(errEmptySnapshot);
+    throw Error(ErrorCode::SnapshotUnavailable);
   }
   if (witnesses_.find(to) != witnesses_.end()) {
     finalizeWitnessSnapshot(*snapshot);
@@ -575,22 +575,20 @@ pbMessageUPtr Raft::makeReplicateMessage(
   uint64_t maxSize)
 {
   StatusWith<uint64_t> term = logEntry_->Term(next - 1);
-  if (term.Code() == errLogCompacted) {
+  if (term.Code() == ErrorCode::LogCompacted) {
     return nullptr;
   }
-  term.IsOKOrThrow();
   StatusWith<vector<pbEntry>> entries =
     logEntry_->GetEntriesFromStart(next, maxSize);
-  if (term.Code() == errLogCompacted) {
+  if (term.Code() == ErrorCode::LogCompacted) {
     return nullptr;
   }
-  entries.IsOKOrThrow();
   if (!entries.Get().empty()) {
     uint64_t lastIndex = entries.Get().rbegin()->index();
     uint64_t expected = entries.Get().size() + next - 1;
     if (lastIndex != expected) {
       log->critical("{0}: Replicate expected {1}, actual {2}", describe(), expected, lastIndex);
-      throw Error(errLogMismatch);
+      throw Error(ErrorCode::LogMismatch);
     }
   }
   if (witnesses_.find(to) != witnesses_.end()) {
@@ -761,7 +759,7 @@ void Raft::resetWitnesses()
 void Raft::becomeObserver(uint64_t term, uint64_t leaderID)
 {
   if (!isObserver()) {
-    throw Error(errUnexpectedRaftState, "only observer can transfer to observer");
+    throw Error(ErrorCode::UnexpectedRaftState, "only observer can transfer to observer");
   }
   reset(term);
   setLeaderID(leaderID);
@@ -771,7 +769,7 @@ void Raft::becomeObserver(uint64_t term, uint64_t leaderID)
 void Raft::becomeWitness(uint64_t term, uint64_t leaderID)
 {
   if (!isWitness()) {
-    throw Error(errUnexpectedRaftState, "only witness can transfer to witness");
+    throw Error(ErrorCode::UnexpectedRaftState, "only witness can transfer to witness");
   }
   reset(term);
   setLeaderID(leaderID);
@@ -781,7 +779,7 @@ void Raft::becomeWitness(uint64_t term, uint64_t leaderID)
 void Raft::becomeFollower(uint64_t term, uint64_t leaderID)
 {
   if (isWitness()) {
-    throw Error(errUnexpectedRaftState, "witness cannot transfer to follower");
+    throw Error(ErrorCode::UnexpectedRaftState, "witness cannot transfer to follower");
   }
   state_ = Follower;
   reset(term);
@@ -791,19 +789,19 @@ void Raft::becomeFollower(uint64_t term, uint64_t leaderID)
 
 void Raft::becomePreCandidate()
 {
-  throw Error(errUnexpectedRaftState, "unimplemented");
+  throw Error(ErrorCode::UnexpectedRaftState, "unimplemented");
 }
 
 void Raft::becomeCandidate()
 {
   if (isLeader()) {
-    throw Error(errUnexpectedRaftState, "leader cannot transfer to candidate");
+    throw Error(ErrorCode::UnexpectedRaftState, "leader cannot transfer to candidate");
   }
   if (isObserver()) {
-    throw Error(errUnexpectedRaftState, "observer cannot transfer to candidate");
+    throw Error(ErrorCode::UnexpectedRaftState, "observer cannot transfer to candidate");
   }
   if (isWitness()) {
-    throw Error(errUnexpectedRaftState, "witness cannot transfer to candidate");
+    throw Error(ErrorCode::UnexpectedRaftState, "witness cannot transfer to candidate");
   }
   // prevote?
   reset(term_ + 1);
@@ -815,7 +813,7 @@ void Raft::becomeCandidate()
 void Raft::becomeLeader()
 {
   if (!isLeader() && !isCandidate()) {
-    throw Error(errUnexpectedRaftState, "only leader or candidate can transfer to leader");
+    throw Error(ErrorCode::UnexpectedRaftState, "only leader or candidate can transfer to leader");
   }
   state_ = Leader;
   reset(term_);
@@ -836,14 +834,14 @@ bool Raft::restore(const pbSnapshot &s)
   if (!isObserver()) {
     for (auto &node : s.membership().observers()) {
       if (node.first == nodeID_) {
-        throw Error(errUnexpectedRaftState, "{0}: converting to observer, received snapshot {1}", s.DebugString());
+        throw Error(ErrorCode::UnexpectedRaftState, "{0}: converting to observer, received snapshot {1}", s.DebugString());
       }
     }
   }
   if (!isWitness()) {
     for (auto &node : s.membership().witnesses()) {
       if (node.first == nodeID_) {
-        throw Error(errUnexpectedRaftState, "{0}: converting to witness, received snapshot {1}", s.DebugString());
+        throw Error(ErrorCode::UnexpectedRaftState, "{0}: converting to witness, received snapshot {1}", s.DebugString());
       }
     }
   }
@@ -870,7 +868,7 @@ void Raft::restoreRemotes(const pbSnapshot &s)
       becomeFollower(term_, leaderID_);
     }
     if (witnesses_.find(node.first) != witnesses_.end()) {
-      throw Error(errUnexpectedRaftState, "witness should not be promoted to a full member");
+      throw Error(ErrorCode::UnexpectedRaftState, "witness should not be promoted to a full member");
     }
     match = 0;
     if (node.first == nodeID_) {
@@ -985,7 +983,7 @@ void Raft::addNode(uint64_t nodeID)
 {
   pendingConfigChange_ = false;
   if (nodeID_ == nodeID && isWitness()) {
-    throw Error(errUnexpectedRaftState, "{0}: is a witness and cannot be added", describe());
+    throw Error(ErrorCode::UnexpectedRaftState, "{0}: is a witness and cannot be added", describe());
   }
   if (remotes_.find(nodeID) != remotes_.end()) {
     // already
@@ -1000,7 +998,7 @@ void Raft::addNode(uint64_t nodeID)
     }
   } else if (witnesses_.find(nodeID) != witnesses_.end()) {
     // promotion from witness is not allowed
-    throw Error(errUnexpectedRaftState, "{0}: could not promote witness", describe());
+    throw Error(ErrorCode::UnexpectedRaftState, "{0}: could not promote witness", describe());
   } else {
     // normal add new node
     setRemote(nodeID, 0, logEntry_->LastIndex() + 1);
@@ -1011,7 +1009,7 @@ void Raft::addObserver(uint64_t nodeID)
 {
   pendingConfigChange_ = false;
   if (nodeID_ == nodeID && !isObserver()) {
-    throw Error(errUnexpectedRaftState, "{0}: is not an observer", describe());
+    throw Error(ErrorCode::UnexpectedRaftState, "{0}: is not an observer", describe());
   }
   if (observers_.find(nodeID) != observers_.end()) {
     // already
@@ -1024,7 +1022,7 @@ void Raft::addWitness(uint64_t nodeID)
 {
   pendingConfigChange_ = false;
   if (nodeID_ == nodeID && !isWitness()) {
-    throw Error(errUnexpectedRaftState, "{0}: is not a witness", describe());
+    throw Error(ErrorCode::UnexpectedRaftState, "{0}: is not a witness", describe());
   }
   if (witnesses_.find(nodeID) != witnesses_.end()) {
     // already
@@ -1080,7 +1078,6 @@ uint64_t Raft::getPendingConfigChangeCount()
   uint64_t count = 0;
   while (true) {
     auto entries = logEntry_->GetEntriesFromStart(index, maxEntrySize_);
-    entries.IsOKOrThrow();
     if (entries.Get().empty()) {
       return count;
     }
@@ -1097,7 +1094,7 @@ void Raft::preLeaderPromotionHandleConfigChange()
 {
   uint64_t count = getPendingConfigChangeCount();
   if (count > 1) {
-    throw Error(errUnexpectedRaftState, "{0}: multiple pending ConfigChange found", describe());
+    throw Error(ErrorCode::UnexpectedRaftState, "{0}: multiple pending ConfigChange found", describe());
   } else if (count == 1) {
     log->info("{0}: becoming leader with pending ConfigChange", describe());
     pendingConfigChange_ = true;
@@ -1222,7 +1219,7 @@ bool Raft::dropRequestVoteFromHighTermNode(pbMessage &m)
     return false;
   }
   if (isLeader() && !quiesce_ && electionTick_ >= electionTimeout_) {
-    throw Error(errUnexpectedRaftState, "{0}: electionTick >= electionTimeout on leader detected", describe());
+    throw Error(ErrorCode::UnexpectedRaftState, "{0}: electionTick >= electionTimeout on leader detected", describe());
   }
   return leaderID_ != NoLeader && electionTick_ < electionTimeout_;
 }
@@ -1338,7 +1335,7 @@ void Raft::handleConfigChange(pbMessage &m)
       case raftpb::AddObserver: addObserver(nodeID);
       case raftpb::AddWitness: addWitness(nodeID);
       default:
-        throw Error(errRaftMessage, "unexpected ConfigChangeType={0}", changeType);
+        throw Error(ErrorCode::UnexpectedRaftMessage, "unexpected ConfigChangeType={0}", changeType);
     }
   }
 }
@@ -1403,11 +1400,11 @@ void Raft::handleLeaderCheckQuorum(pbMessage &m)
 bool Raft::hasCommittedEntryAtCurrentTerm()
 {
   if (term_ == 0) {
-    throw Error(errUnexpectedRaftState, "not supposed to reach here");
+    throw Error(ErrorCode::UnexpectedRaftState, "not supposed to reach here");
   }
   StatusWith<uint64_t> lastCommittedTerm = logEntry_->Term(logEntry_->Committed());
-  if (!lastCommittedTerm.IsOK() && lastCommittedTerm.Code() != errLogCompacted) {
-    lastCommittedTerm.IsOKOrThrow();
+  if (!lastCommittedTerm.IsOK() && lastCommittedTerm.Code() == ErrorCode::LogCompacted) {
+    return true;
   }
   return lastCommittedTerm.Get() == term_;
 }
@@ -1514,7 +1511,7 @@ void Raft::handleLeaderLeaderTransfer(pbMessage &m)
   uint64_t target = m.hint();
   log->info("{0}: LeaderTransfer, target={1}", describe(), target);
   if (target == NoNode) {
-    throw Error(errRaftMessage, "LeaderTransfer target not set");
+    throw Error(ErrorCode::UnexpectedRaftMessage, "LeaderTransfer target not set");
   }
   if (isLeaderTransferring()) {
     log->warn("{0}: ignored LeaderTransfer, transfer is ongoing", describe());

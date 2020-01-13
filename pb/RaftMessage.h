@@ -41,6 +41,13 @@ typedef struct SystemCtx {
   uint64_t High;
 } pbSystemCtx;
 
+struct SystemCtxHash {
+  size_t operator()(const SystemCtx& rhs) const {
+    return std::hash<uint64_t>()(rhs.Low)
+      ^ std::hash<uint64_t>()(rhs.High);
+  }
+};
+
 inline bool operator==(const SystemCtx &lhs, const SystemCtx &rhs)
 {
   return lhs.Low == rhs.Low && lhs.High == rhs.High;

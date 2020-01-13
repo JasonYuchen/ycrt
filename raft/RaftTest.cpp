@@ -9,5 +9,7 @@ using namespace ycrt;
 
 TEST(Raft, Core)
 {
+  int i = 9;
+  throw Error(ErrorCode::UnexpectedRaftState, "ok? {0}:{1}", 5, i);
   ASSERT_TRUE(1);
 }

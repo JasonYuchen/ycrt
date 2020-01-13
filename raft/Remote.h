@@ -91,7 +91,7 @@ class Remote {
     } else if (state_ == Retry) {
       RetryToWait();
     } else {
-      throw Error(errRemoteState, "unexpected remote state");
+      throw Error(ErrorCode::RemoteState, "unexpected remote state");
     }
   }
 
