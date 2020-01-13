@@ -26,6 +26,8 @@ enum ErrorCode : uint32_t {
   errRaftMessage,
   errLogMismatch,
   errEmptySnapshot,
+  errInvalidReadIndex,
+  errOther
 };
 
 // maybe recoverable
@@ -38,7 +40,7 @@ class Error : public std::runtime_error {
   template<typename S, typename... Args>
   Error(ErrorCode code, const S& format_str, Args&&... args)
     : std::runtime_error(
-        fmt::format(format_str, std::forward<Args...>(args...))),
+        fmt::format(format_str, std::forward<Args>(args)...)),
       code_(code) {}
  private:
   ErrorCode code_;

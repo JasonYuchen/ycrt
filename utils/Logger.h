@@ -14,6 +14,7 @@ namespace ycrt
 
 class Logger {
  public:
+  DISALLOW_COPY_MOVE_AND_ASSIGN(Logger);
   static Logger &ins() {
     static Logger logger;
     return logger;
@@ -24,7 +25,6 @@ class Logger {
   }
   // TODO: set pattern, level, sinks, etc...
  private:
-  DISALLOW_COPY_MOVE_AND_ASSIGN(Logger);
   Logger() {
     auto sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
     sink->set_pattern("%Y-%m-%d %H:%M:%S.%f %^%L%$ %n %t %v");

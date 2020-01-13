@@ -25,6 +25,7 @@ boost::asio::ip::tcp::endpoint getEndpoint(string_view addrPort);
 
 class Nodes {
  public:
+  DISALLOW_COPY_AND_ASSIGN(Nodes);
   static std::unique_ptr<Nodes> New(
     std::function<uint64_t(uint64_t)> &&partitionIDFunc);
   struct Record {

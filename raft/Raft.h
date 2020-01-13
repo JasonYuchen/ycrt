@@ -15,12 +15,11 @@
 #include "server/Event.h"
 #include "utils/Utils.h"
 #include "Remote.h"
+#include "ReadIndex.h"
 #include "pb/RaftMessage.h"
 #include "LogEntry.h"
 #include "ycrt/Config.h"
 #include "server/Event.h"
-
-#include "tests/TestHack.h"
 
 namespace ycrt
 {
@@ -30,6 +29,8 @@ namespace raft
 
 class Raft {
  public:
+  DISALLOW_COPY_AND_ASSIGN(Raft);
+
   enum State : uint8_t {
     Follower = 0, PreCandidate, Candidate, Leader, Observer, Witness, NumOfState
   };
@@ -244,10 +245,15 @@ class Raft {
   // hasNotAppliedConfigChange
   server::RaftEventListenerSPtr listener_;
 };
-using RaftSPtr = std::shared_ptr<Raft>;
 using RaftUPtr = std::shared_ptr<Raft>;
 
-const char *StateToString(enum Raft::State state);
+inline const char *StateToString(enum Raft::State state)
+{
+  static const char *states[] =
+    {"Follower", "PreCandidate", "Candidate", "Leader", "Observer", "Witness"};
+  assert(state < Raft::NumOfState);
+  return states[state];
+}
 
 } // namespace raft
 

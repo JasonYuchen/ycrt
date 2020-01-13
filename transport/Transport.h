@@ -32,6 +32,7 @@ namespace transport
 // owned by NodeHost
 class Transport {
  public:
+  DISALLOW_COPY_AND_ASSIGN(Transport);
   static std::unique_ptr<Transport> New(
     const NodeHostConfig  &nhConfig,
     Nodes &resolver,
