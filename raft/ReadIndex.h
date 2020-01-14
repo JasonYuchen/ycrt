@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 #include <iterator>
+#include <set>
 
 #include "utils/Error.h"
 #include "pb/RaftMessage.h"

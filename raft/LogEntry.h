@@ -10,7 +10,7 @@
 #include <stdint.h>
 #include "pb/RaftMessage.h"
 #include "InMemory.h"
-#include "utils/Error.h"
+#include "utils/Utils.h"
 
 namespace ycrt
 {
@@ -31,67 +31,159 @@ class LogDB {
     uint64_t low, uint64_t high, uint64_t maxSize);
   pbSnapshotUPtr Snapshot();
   Status Compact(uint64_t index);
-  Status Append(std::vector<pbEntry> &entries);
+  Status Append(Span<pbEntry> entries);
  private:
 };
-using LogDBSPtr = std::shared_ptr<LogDB>;
+using LogDBUPtr = std::unique_ptr<LogDB>;
 
 class LogEntry {
  public:
-  explicit LogEntry(LogDBSPtr logDB)
+  explicit LogEntry(LogDBUPtr logDB)
     : logDB_(std::move(logDB)),
-      inMem_(),
-      committed_(),
-      processed_()
+      inMem_(new InMemory(logDB_->Range().second)),
+      committed_(logDB_->Range().first - 1),
+      processed_(logDB_->Range().first - 1)
   {
-    auto index = logDB_->Range();
-    inMem_.reset(new InMemory(index.second));
-    committed_ = index.first - 1;
-    processed_ = index.first - 1;
   }
-  uint64_t Committed();
-  void SetCommitted(uint64_t committed);
-  uint64_t Processed();
-  uint64_t FirstIndex();
-  uint64_t LastIndex();
-  std::pair<uint64_t, uint64_t> TermEntryRange();
-  StatusWith<std::pair<uint64_t, uint64_t>> EntryRange();
-  uint64_t LastTerm();
-  StatusWith<uint64_t> Term(uint64_t index);
-  Status CheckBound(uint64_t low, uint64_t high);
-  std::vector<pbEntry> GetUncommittedEntries();
+  uint64_t Committed()
+  {
+    return 0;
+  }
+  void SetCommitted(uint64_t committed)
+  {
+
+  }
+  uint64_t Processed()
+  {
+    return 0;
+  }
+  uint64_t FirstIndex()
+  {
+    return 0;
+  }
+  uint64_t LastIndex()
+  {
+    return 0;
+  }
+  std::pair<uint64_t, uint64_t> TermEntryRange()
+  {
+    return std::pair<uint64_t, uint64_t>();
+  }
+  StatusWith<std::pair<uint64_t, uint64_t>> EntryRange()
+  {
+    return StatusWith<std::pair<uint64_t, uint64_t>>(ErrorCode::OutOfRange);
+  }
+  uint64_t LastTerm()
+  {
+    return 0;
+  }
+  StatusWith<uint64_t> Term(uint64_t index)
+  {
+    return StatusWith<uint64_t>(ErrorCode::OutOfRange);
+  }
+  Status CheckBound(uint64_t low, uint64_t high)
+  {
+    return Status();
+  }
+  std::vector<pbEntry> GetUncommittedEntries()
+  {
+    return std::vector<pbEntry>();
+  }
   StatusWith<std::vector<pbEntry>> GetEntriesFromLogDB(
-    uint64_t low, uint64_t high, uint64_t maxSize);
+    uint64_t low, uint64_t high, uint64_t maxSize)
+  {
+    return StatusWith<std::vector<pbEntry>>(ErrorCode::OutOfRange);
+  }
   std::vector<pbEntry> GetEntriesFromInMem(
-    uint64_t low, uint64_t high);
+    uint64_t low, uint64_t high)
+  {
+    return std::vector<pbEntry>();
+  }
   StatusWith<std::vector<pbEntry>> GetEntriesWithBound(
-    uint64_t low, uint64_t high);
+    uint64_t low, uint64_t high)
+  {
+    return StatusWith<std::vector<pbEntry>>(ErrorCode::OutOfRange);
+  }
   StatusWith<std::vector<pbEntry>> GetEntriesFromStart(
-    uint64_t start, uint64_t maxSize);
-  std::vector<pbEntry> GetEntriesToApply(uint64_t limit);
-  std::vector<pbEntry> GetEntriesToSave();
-  pbSnapshotUPtr GetSnapshot();
-  uint64_t GetFirstNotAppliedIndex();
-  uint64_t GetToApplyIndexLimit();
-  bool HasEntriesToApply();
-  bool HasMoreEntriesToApply(uint64_t appliedTo);
-  bool TryAppend(uint64_t index, std::vector<pbEntry> &entries);
-  void Append(std::vector<pbEntry> &entries);
-  uint64_t GetConflictIndex(std::vector<pbEntry> &entries);
-  void CommitTo(uint64_t index);
-  void CommitUpdate(/*pb.UpdateCommit*/);
-  bool MatchTerm(uint64_t index, uint64_t term);
-  bool IsUpToDate(uint64_t index, uint64_t term);
-  bool TryCommit(uint64_t index, uint64_t term);
-  void Restore(pbSnapshotSPtr);
-  void InMemoryGC();
+    uint64_t start, uint64_t maxSize)
+  {
+    return StatusWith<std::vector<pbEntry>>(ErrorCode::OutOfRange);
+  }
+  std::vector<pbEntry> GetEntriesToApply(uint64_t limit)
+  {
+    return std::vector<pbEntry>();
+  }
+  std::vector<pbEntry> GetEntriesToSave()
+  {
+    return std::vector<pbEntry>();
+  }
+  pbSnapshotUPtr GetSnapshot()
+  {
+    return ycrt::pbSnapshotUPtr();
+  }
+  uint64_t GetFirstNotAppliedIndex()
+  {
+    return 0;
+  }
+  uint64_t GetToApplyIndexLimit()
+  {
+    return 0;
+  }
+  bool HasEntriesToApply()
+  {
+    return false;
+  }
+  bool HasMoreEntriesToApply(uint64_t appliedTo)
+  {
+    return false;
+  }
+  bool TryAppend(uint64_t index, Span<pbEntry> entries)
+  {
+    return false;
+  }
+  void Append(Span<pbEntry> entries)
+  {
+
+  }
+  uint64_t GetConflictIndex(Span<pbEntry> entries)
+  {
+    return 0;
+  }
+  void CommitTo(uint64_t index)
+  {
+
+  }
+  void CommitUpdate(/*pb.UpdateCommit*/)
+  {
+
+  }
+  bool MatchTerm(uint64_t index, uint64_t term)
+  {
+    return false;
+  }
+  bool IsUpToDate(uint64_t index, uint64_t term)
+  {
+    return false;
+  }
+  bool TryCommit(uint64_t index, uint64_t term)
+  {
+    return false;
+  }
+  void Restore(const pbSnapshot &s)
+  {
+
+  }
+  void InMemoryGC()
+  {
+
+  }
  private:
-  LogDBSPtr logDB_;
-  InMemorySPtr inMem_;
+  LogDBUPtr logDB_;
+  InMemoryUPtr inMem_;
   uint64_t committed_;
   uint64_t processed_;
 };
-using LogEntrySPtr = std::shared_ptr<LogEntry>;
+using LogEntryUPtr = std::unique_ptr<LogEntry>;
 
 } // namespace raft
 
