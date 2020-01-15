@@ -16,10 +16,10 @@ namespace raft
 
 using namespace std;
 
-Raft::Raft(ConfigSPtr &config, LogDBUPtr logdb)
+Raft::Raft(const Config &config, LogDBUPtr logdb)
   : log(Log.GetLogger("raft")),
-    clusterID_(config->ClusterID),
-    nodeID_(config->NodeID),
+    clusterID_(config.ClusterID),
+    nodeID_(config.NodeID),
     cn_(fmt::format("[{0:05d}:{1:05d}]", clusterID_, nodeID_)),
     leaderID_(NoLeader),
     leaderTransferTargetID_(NoLeader),
@@ -41,12 +41,12 @@ Raft::Raft(ConfigSPtr &config, LogDBUPtr logdb)
     droppedEntries_(),
     droppedReadIndexes_(),
     quiesce_(false),
-    checkQuorum_(config->CheckQuorum),
+    checkQuorum_(config.CheckQuorum),
     tickCount_(0),
     electionTick_(0),
     heartbeatTick_(0),
-    electionTimeout_(config->ElectionRTT),
-    heartbeatTimeout_(config->HeartbeatRTT),
+    electionTimeout_(config.ElectionRTT),
+    heartbeatTimeout_(config.HeartbeatRTT),
     randomizedElectionTimeout_(0),
     maxEntrySize_(settings::Soft::ins().MaxEntrySize),
     inMemoryGCTimeout_(settings::Soft::ins().InMemGCTimeout),
@@ -70,10 +70,10 @@ Raft::Raft(ConfigSPtr &config, LogDBUPtr logdb)
   if (!(nodeState.first == nullptr)) {
     loadState(nodeState.first);
   }
-  if (config->IsObserver) {
+  if (config.IsObserver) {
     state_ = Observer;
     becomeObserver(term_, NoLeader);
-  } else if (config->IsWitness) {
+  } else if (config.IsWitness) {
     state_ = Witness;
     becomeWitness(term_, NoLeader);
   } else {
@@ -189,6 +189,15 @@ string Raft::describe()
     "Raft[first={0},last={1},term={2},commit={3},applied={4}] {5} with term {6}",
     logEntry_->FirstIndex(), lastIndex, term.GetOrDefault(0),
     logEntry_->Committed(), logEntry_->Processed(), cn_, term_);
+}
+
+pbState Raft::raftState()
+{
+  pbState state;
+  state.set_term(term_);
+  state.set_vote(vote_);
+  state.set_commit(logEntry_->Committed());
+  return state;
 }
 
 void Raft::loadState(const pbStateSPtr &state)

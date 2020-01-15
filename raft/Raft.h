@@ -43,15 +43,17 @@ class Raft {
     bool IsLeader() { return NodeState == Leader; }
     bool IsFollower() { return NodeState == Follower; }
   };
-  Raft(ConfigSPtr &config, LogDBUPtr logdb);
+  Raft(const Config &config, LogDBUPtr logdb);
   Status GetLocalStatus();
   void Handle(pbMessage &&m);
   void Handle(pbMessage &m);
  private:
+  friend class Peer;
   void initializeHandlerMap();
 
   // status
   std::string describe();
+  pbState raftState();
   void loadState(const pbStateSPtr &state);
   void setLeaderID(uint64_t leader);
   bool isFollower();

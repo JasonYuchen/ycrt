@@ -36,6 +36,9 @@ using pbMembershipUPtr = std::unique_ptr<raftpb::Membership>;
 using pbEntry = raftpb::Entry;
 using pbEntrySPtr = std::shared_ptr<raftpb::Entry>;
 using pbEntryUPtr = std::unique_ptr<raftpb::Entry>;
+using pbConfigChange = raftpb::ConfigChange;
+using pbConfigChangeSPtr = std::shared_ptr<raftpb::ConfigChange>;
+using pbConfigChangeUPtr = std::unique_ptr<raftpb::ConfigChange>;
 
 typedef struct SystemCtx {
   uint64_t Low;
