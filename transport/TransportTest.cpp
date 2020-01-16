@@ -33,17 +33,20 @@ TEST(Transport, Client)
   transport2->Start();
   Log.GetLogger("transport")->info("test start");
 
-  pbMessageUPtr msg1(new raftpb::Message());
-  msg1->set_cluster_id(1);
-  msg1->set_to(2);
-  msg1->set_from(1);
-  transport1->AsyncSendMessage(std::move(msg1));
+  for (int i = 0; i < 20; ++i) {
+    pbMessageUPtr msg1(new raftpb::Message());
+    msg1->set_cluster_id(1);
+    msg1->set_to(2);
+    msg1->set_from(1);
+    transport1->AsyncSendMessage(std::move(msg1));
+  }
+
   pbMessageUPtr msg2(new raftpb::Message());
   msg2->set_cluster_id(1);
   msg2->set_to(3);
   msg2->set_from(1);
   transport1->AsyncSendMessage(std::move(msg2));
-  std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+  std::this_thread::sleep_for(std::chrono::milliseconds(2000));
   Log.GetLogger("transport")->flush();
   transport1->Stop();
   transport2->Stop();

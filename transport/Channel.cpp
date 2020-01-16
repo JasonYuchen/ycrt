@@ -29,6 +29,7 @@ SendChannel::SendChannel(
     sourceAddress_(std::move(source)),
     io_(io),
     socket_(io),
+    idleTimer_(io),
     resolver_(io),
     nodeRecord_(std::move(nodeRecord)),
     bufferQueue_(make_shared<BlockingConcurrentQueue<pbMessageUPtr>>(queueLen))
@@ -38,7 +39,9 @@ SendChannel::SendChannel(
 
 void SendChannel::Start()
 {
+  idleTimer_.expires_from_now(seconds(1));
   resolve();
+  checkIdle();
 }
 
 // one channel per remote raft node,
@@ -61,38 +64,42 @@ SendChannel::~SendChannel()
 
 void SendChannel::asyncSendMessage()
 {
+  idleTimer_.expires_from_now(seconds(1));
   boost::asio::post(io_, [this, self = shared_from_this()](){
     inQueue_ = false;
     // FIXME: fetch all in bufferQueue, 10 ?
     vector<pbMessageUPtr> items(10);
-    auto count = bufferQueue_->try_dequeue_bulk(items.begin(), 10);
-    if (count == 0) {
-      return;
-    }
-    // put it in output Queue
-    bool inProgress = !outputQueue_.empty();
-    auto batch = make_unique<raftpb::MessageBatch>();
-    batch->set_source_address(sourceAddress_);
-    batch->set_deployment_id(transport_->GetDeploymentID());
-    // TODO: MessageBatch rpc bin ver
-    for (size_t i = 0; i < count; ++i) {
-      // TODO: use customized serialization, not thread-safe to use move here !!!
-      batch->mutable_requests()->Add(std::move(*items[i]));
-    }
-    outputQueue_.push(std::move(batch));
-    // do output
-    if (!inProgress) {
-      log->debug("SendChannel to {0} with next message {1}",
-        nodeRecord_->Address, outputQueue_.front()->DebugString());
-      // FIXME: do not hack
-      RequestHeader header{RequestType, 0, 0};
-      buffer_.clear();
-      buffer_.insert(0, RequestHeaderSize, 0);
-      header.Encode(const_cast<char *>(buffer_.data()), RequestHeaderSize);
-      outputQueue_.front()->AppendToString(&buffer_);
-      uint64_t total = buffer_.size() - RequestHeaderSize;
-      ::memcpy(const_cast<char *>(buffer_.data()+8), &total, sizeof(total));
-      sendMessage();
+    while (true) {
+      items.clear();
+      auto count = bufferQueue_->try_dequeue_bulk(items.begin(), 10);
+      if (count == 0) {
+        return;
+      }
+      // put it in output Queue
+      bool inProgress = !outputQueue_.empty();
+      auto batch = make_unique<raftpb::MessageBatch>();
+      batch->set_source_address(sourceAddress_);
+      batch->set_deployment_id(transport_->GetDeploymentID());
+      // TODO: MessageBatch rpc bin ver
+      for (size_t i = 0; i < count; ++i) {
+        // TODO: use customized serialization, not thread-safe to use move here !!!
+        batch->mutable_requests()->Add(std::move(*items[i]));
+      }
+      outputQueue_.push(std::move(batch));
+      // do output
+      if (!inProgress) {
+        log->debug("SendChannel to {0} with next message {1}",
+          nodeRecord_->Address, outputQueue_.front()->DebugString());
+        // FIXME: do not hack
+        RequestHeader header{RequestType, 0, 0};
+        buffer_.clear();
+        buffer_.insert(0, RequestHeaderSize, 0);
+        header.Encode(const_cast<char *>(buffer_.data()), RequestHeaderSize);
+        outputQueue_.front()->AppendToString(&buffer_);
+        uint64_t total = buffer_.size() - RequestHeaderSize;
+        ::memcpy(const_cast<char *>(buffer_.data()+8), &total, sizeof(total));
+        sendMessage();
+      }
     }
   });
 }
@@ -107,7 +114,16 @@ void SendChannel::sendMessage()
       if (!ec) {
         outputQueue_.pop();
         if (!outputQueue_.empty()) {
-          outputQueue_.front()->SerializeToString(&buffer_);
+          log->debug("SendChannel to {0} with next message {1}",
+            nodeRecord_->Address, outputQueue_.front()->DebugString());
+          // FIXME: do not hack
+          RequestHeader header{RequestType, 0, 0};
+          buffer_.clear();
+          buffer_.insert(0, RequestHeaderSize, 0);
+          header.Encode(const_cast<char *>(buffer_.data()), RequestHeaderSize);
+          outputQueue_.front()->AppendToString(&buffer_);
+          uint64_t total = buffer_.size() - RequestHeaderSize;
+          ::memcpy(const_cast<char *>(buffer_.data()+8), &total, sizeof(total));
           sendMessage();
         }
       } else if (ec.value() == error::operation_aborted) {
@@ -143,6 +159,7 @@ void SendChannel::resolve()
 
 void SendChannel::connect(tcp::resolver::results_type endpointIter)
 {
+  idleTimer_.expires_from_now(seconds(1));
   boost::asio::async_connect(
     socket_,
     endpointIter,
@@ -165,17 +182,27 @@ void SendChannel::connect(tcp::resolver::results_type endpointIter)
     });
 }
 
+void SendChannel::checkIdle()
+{
+  if (idleTimer_.expiry() <= steady_timer::clock_type::now()) {
+    // TODO
+  }
+}
+
 RecvChannel::RecvChannel(Transport *tranport, io_context &io)
   : transport_(tranport),
     log(Log.GetLogger("transport")),
     socket_(io),
+    idleTimer_(io),
     payloadBuf_(PayloadBufSize)
 {
 }
 
 void RecvChannel::Start()
 {
+  idleTimer_.expires_from_now(seconds(1));
   readHeader();
+  checkIdle();
 }
 
 RecvChannel::~RecvChannel()
@@ -268,6 +295,13 @@ bool RecvChannel::decodeHeader()
   }
   // FIXME: check crc32
   return true;
+}
+
+void RecvChannel::checkIdle()
+{
+  if (idleTimer_.expiry() <= steady_timer::clock_type::now()) {
+    // TODO
+  }
 }
 
 } // namespace transport

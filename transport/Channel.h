@@ -66,6 +66,7 @@ class SendChannel : public std::enable_shared_from_this<SendChannel> {
   void sendMessage();
   void resolve();
   void connect(boost::asio::ip::tcp::resolver::results_type endpointIter);
+  void checkIdle();
   slogger log;
   Transport *transport_;
   std::atomic_bool isConnected_;
@@ -74,6 +75,7 @@ class SendChannel : public std::enable_shared_from_this<SendChannel> {
   boost::asio::io_context &io_;
   boost::asio::ip::tcp::socket socket_;
   boost::asio::ip::tcp::resolver resolver_;
+  boost::asio::steady_timer idleTimer_;
   NodesRecordSPtr nodeRecord_;
   BlockingConcurrentQueueSPtr<pbMessageUPtr> bufferQueue_;
   std::queue<pbMessageBatchUPtr> outputQueue_;
@@ -103,9 +105,11 @@ class RecvChannel : public std::enable_shared_from_this<RecvChannel> {
   void readHeader();
   void readPayload();
   bool decodeHeader();
+  void checkIdle();
   slogger log;
   Transport *transport_;
   boost::asio::ip::tcp::socket socket_;
+  boost::asio::steady_timer idleTimer_;
   RequestHeader header_;
   char headerBuf_[RequestHeaderSize];
   std::vector<char> payloadBuf_;
