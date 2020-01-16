@@ -57,6 +57,19 @@ inline bool operator==(const SystemCtx &lhs, const SystemCtx &rhs)
   return lhs.Low == rhs.Low && lhs.High == rhs.High;
 }
 
+inline bool operator==(const pbState &lhs, const pbState &rhs)
+{
+  return
+    lhs.term() == rhs.term() &&
+    lhs.vote() == rhs.vote() &&
+    lhs.commit() == rhs.commit();
+}
+
+inline bool operator!=(const pbState &lhs, const pbState &rhs)
+{
+  return !(lhs == rhs);
+}
+
 typedef struct ReadyToRead {
   uint64_t Index;
   struct SystemCtx SystemCtx;
