@@ -28,6 +28,7 @@ namespace transport
 // TODO: enable CircuitBreaker
 // TODO: asyncSendSnapshot
 // TODO: snapshot streaming
+// TODO: enable idle timeout
 
 // owned by NodeHost
 class Transport {

@@ -81,6 +81,8 @@ bool Transport::AsyncSendMessage(pbMessageUPtr m)
         this, nextIOContext(), sourceAddress_, node, sendQueueLength_);
       sendChannels_[node->Key] = ch;
       ch->Start();
+    } else {
+      ch = it->second;
     }
   }
   ch->AsyncSendMessage(std::move(m));
