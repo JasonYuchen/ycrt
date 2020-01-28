@@ -67,6 +67,7 @@ class SendChannel : public std::enable_shared_from_this<SendChannel> {
   void resolve();
   void connect(boost::asio::ip::tcp::resolver::results_type endpointIter);
   void checkIdle();
+  void stop();
   slogger log;
   Transport *transport_;
   std::atomic_bool isConnected_;
@@ -76,13 +77,13 @@ class SendChannel : public std::enable_shared_from_this<SendChannel> {
   boost::asio::ip::tcp::socket socket_;
   boost::asio::ip::tcp::resolver resolver_;
   boost::asio::steady_timer idleTimer_;
+  bool stopped_;
   NodesRecordSPtr nodeRecord_;
   BlockingConcurrentQueueSPtr<pbMessageUPtr> bufferQueue_;
   std::queue<pbMessageBatchUPtr> outputQueue_;
   std::string buffer_;
 };
 using SendChannelSPtr = std::shared_ptr<SendChannel>;
-using SendChannelUPtr = std::unique_ptr<SendChannel>;
 
 using RequestHandler = std::function<void(pbMessageBatchUPtr)>;
 using ChunkHandler = std::function<void(pbSnapshotChunkUPtr)>;
@@ -91,11 +92,11 @@ class RecvChannel : public std::enable_shared_from_this<RecvChannel> {
  public:
   explicit RecvChannel(Transport *tranport, boost::asio::io_context &io);
   boost::asio::ip::tcp::socket &socket() {return socket_;}
-  void SetRequestHandlerPtr(RequestHandler &&handler)
+  void SetRequestHandler(RequestHandler &&handler)
   {
     requestHandler_ = std::move(handler);
   }
-  void SetChunkHandlerPtr(ChunkHandler &&handler)
+  void SetChunkHandler(ChunkHandler &&handler)
   {
     chunkHandler_ = std::move(handler);
   }
@@ -106,10 +107,12 @@ class RecvChannel : public std::enable_shared_from_this<RecvChannel> {
   void readPayload();
   bool decodeHeader();
   void checkIdle();
+  void stop();
   slogger log;
   Transport *transport_;
   boost::asio::ip::tcp::socket socket_;
   boost::asio::steady_timer idleTimer_;
+  bool stopped_;
   RequestHeader header_;
   char headerBuf_[RequestHeaderSize];
   std::vector<char> payloadBuf_;
@@ -117,7 +120,6 @@ class RecvChannel : public std::enable_shared_from_this<RecvChannel> {
   ChunkHandler chunkHandler_;
 };
 using RecvChannelSPtr = std::shared_ptr<RecvChannel>;
-using RecvChannelUPtr = std::unique_ptr<RecvChannel>;
 
 } // namespace transport
 

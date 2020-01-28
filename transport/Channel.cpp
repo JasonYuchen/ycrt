@@ -16,6 +16,13 @@ namespace ycrt
 namespace transport
 {
 
+// FIXME:
+constexpr seconds ResolveDuration(1);
+constexpr seconds ConnectDuration(1);
+constexpr seconds SendDuration(1);
+constexpr seconds ReadHeaderDuration(1);
+constexpr seconds ReadPayloadDuration(1);
+
 SendChannel::SendChannel(
   Transport *tranport,
   io_context &io,
@@ -30,6 +37,7 @@ SendChannel::SendChannel(
     io_(io),
     socket_(io),
     idleTimer_(io),
+    stopped_(false),
     resolver_(io),
     nodeRecord_(std::move(nodeRecord)),
     bufferQueue_(make_shared<BlockingConcurrentQueue<pbMessageUPtr>>(queueLen))
@@ -39,7 +47,6 @@ SendChannel::SendChannel(
 
 void SendChannel::Start()
 {
-  idleTimer_.expires_from_now(seconds(1));
   resolve();
   checkIdle();
 }
@@ -83,7 +90,7 @@ void SendChannel::asyncSendMessage()
       // TODO: MessageBatch rpc bin ver
       for (size_t i = 0; i < count; ++i) {
         // TODO: use customized serialization, not thread-safe to use move here !!!
-        batch->mutable_requests()->Add(std::move(*items[i]));
+        batch->mutable_requests()->AddAllocated(items[i].release());
       }
       outputQueue_.push(std::move(batch));
       // do output
@@ -106,6 +113,7 @@ void SendChannel::asyncSendMessage()
 
 void SendChannel::sendMessage()
 {
+  idleTimer_.expires_from_now(SendDuration);
   log->debug("SendChannel send {0} bytes to {1}", buffer_.length(), nodeRecord_->Address);
   boost::asio::async_write(socket_,
     buffer(buffer_.data(), buffer_.length()),
@@ -133,13 +141,14 @@ void SendChannel::sendMessage()
         log->warn("SendChannel to {0} closed due to async_write error {1}",
           nodeRecord_->Address, ec.message());
         transport_->RemoveSendChannel(nodeRecord_->Key);
-        socket_.close();
+        stop();
       }
     });
 }
 
 void SendChannel::resolve()
 {
+  idleTimer_.expires_from_now(ResolveDuration);
   resolver_.async_resolve(getEndpoint(string_view(nodeRecord_->Address)),
     [this, self = shared_from_this()]
     (error_code ec, tcp::resolver::results_type it) {
@@ -152,14 +161,14 @@ void SendChannel::resolve()
         log->warn("SendChannel to {0} closed due to async_resolve error {1}",
           nodeRecord_->Address, ec.message());
         transport_->RemoveSendChannel(nodeRecord_->Key);
-        socket_.close();
+        stop();
       }
     });
 }
 
 void SendChannel::connect(tcp::resolver::results_type endpointIter)
 {
-  idleTimer_.expires_from_now(seconds(1));
+  idleTimer_.expires_from_now(ConnectDuration);
   boost::asio::async_connect(
     socket_,
     endpointIter,
@@ -177,16 +186,34 @@ void SendChannel::connect(tcp::resolver::results_type endpointIter)
         log->warn("SendChannel to {0} closed due to async_connect error {1}",
           nodeRecord_->Address, ec.message());
         transport_->RemoveSendChannel(nodeRecord_->Key);
-        socket_.close();
+        stop();
       }
     });
 }
 
 void SendChannel::checkIdle()
 {
-  if (idleTimer_.expiry() <= steady_timer::clock_type::now()) {
-    // TODO
-  }
+  idleTimer_.async_wait(
+    [this, self = shared_from_this()] (error_code ec)
+    {
+      if (stopped_) {
+        return;
+      }
+      if (idleTimer_.expiry() <= steady_timer::clock_type::now()) {
+        // the deadline has passed
+        stop();
+        log->warn("send channel for {0} timed out", nodeRecord_->Key);
+      } else {
+        // the deadline has not passed, wait again
+        checkIdle();
+      }
+    });
+}
+
+void SendChannel::stop()
+{
+  stopped_ = true;
+  socket_.close();
 }
 
 RecvChannel::RecvChannel(Transport *tranport, io_context &io)
@@ -194,13 +221,13 @@ RecvChannel::RecvChannel(Transport *tranport, io_context &io)
     log(Log.GetLogger("transport")),
     socket_(io),
     idleTimer_(io),
+    stopped_(false),
     payloadBuf_(PayloadBufSize)
 {
 }
 
 void RecvChannel::Start()
 {
-  idleTimer_.expires_from_now(seconds(1));
   readHeader();
   checkIdle();
 }
@@ -211,23 +238,26 @@ RecvChannel::~RecvChannel()
 
 void RecvChannel::readHeader()
 {
+  idleTimer_.expires_from_now(ReadHeaderDuration);
   boost::asio::async_read(
     socket_,
     buffer(headerBuf_, RequestHeaderSize),
     [this, self = shared_from_this()](error_code ec, size_t length)
     {
-      if (!ec && decodeHeader()) {
-        readPayload();
+      if (!ec) {
+        if (decodeHeader()) {
+          readPayload();
+        } else {
+          log->error("RecvChannel closed due to invalid header");
+          stop();
+          return;
+        }
       } else if (ec.value() == error::operation_aborted) {
         return;
       } else {
-        if (ec) {
-          log->error("RecvChannel closed due to async_read error {0}",
-            ec.message());
-        } else {
-          log->error("RecvChannel closed due to invalid header");
-        }
-        socket_.close();
+        log->error("RecvChannel closed due to async_read error {0}",
+          ec.message());
+        stop();
         return;
       }
     });
@@ -235,6 +265,7 @@ void RecvChannel::readHeader()
 
 void RecvChannel::readPayload()
 {
+  idleTimer_.expires_from_now(ReadPayloadDuration);
   boost::asio::async_read(socket_,
     buffer(payloadBuf_, header_.Size),
     [this, self = shared_from_this()](error_code ec, size_t length)
@@ -247,7 +278,7 @@ void RecvChannel::readPayload()
           if (!done) {
             log->error("RecvChannel closed due to invalid payload(MessageBatch)",
               ec.message());
-            socket_.close();
+            stop();
             return;
           }
           requestHandler_(std::move(msg));
@@ -257,14 +288,14 @@ void RecvChannel::readPayload()
           if (!done) {
             log->error("RecvChannel closed due to invalid payload(SnapshotChunk)",
               ec.message());
-            socket_.close();
+            stop();
             return;
           }
           chunkHandler_(std::move(msg));
         } else {
           // should not reach here
           log->error("RecvChannel closed due to invalid method type");
-          socket_.close();
+          stop();
           return;
         }
         readHeader();
@@ -273,7 +304,7 @@ void RecvChannel::readPayload()
       } else {
         log->error("RecvChannel closed due to async_read error {0}",
           ec.message());
-        socket_.close();
+        stop();
         return;
       }
     });
@@ -299,8 +330,28 @@ bool RecvChannel::decodeHeader()
 
 void RecvChannel::checkIdle()
 {
-  if (idleTimer_.expiry() <= steady_timer::clock_type::now()) {
-    // TODO
+  idleTimer_.async_wait(
+    [this, self = shared_from_this()] (error_code ec)
+    {
+      if (stopped_) {
+        return;
+      }
+      if (idleTimer_.expiry() <= steady_timer::clock_type::now()) {
+        // the deadline has passed
+        stop();
+        log->warn("receive channel for {0} timed out", socket_.remote_endpoint().address().to_string());
+      } else {
+        // the deadline has not passed, wait again
+        checkIdle();
+      }
+    });
+}
+
+void RecvChannel::stop()
+{
+  if (!stopped_) {
+    stopped_ = true;
+    socket_.close();
   }
 }
 
