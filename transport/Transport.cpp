@@ -2,6 +2,8 @@
 // Created by jason on 2019/12/21.
 //
 
+#include <functional>
+
 #include "Channel.h"
 #include "pb/raft.pb.h"
 #include "Transport.h"
@@ -97,36 +99,8 @@ void Transport::Start()
     [conn, this](const error_code &ec) mutable {
       if (!ec) {
         log->info("new connection received from {0}", conn->socket().remote_endpoint().address().to_string());
-        conn->SetRequestHandlerPtr(
-          [this](pbMessageBatchUPtr m)
-          {
-            if (m->deployment_id() != deploymentID_) {
-              log->warn("deployment id does not match,"
-                        " received {0:d}, actual {1:d}, message dropped",
-                        m->deployment_id(), deploymentID_);
-              return;
-            }
-            // FIXME: Check RPC Bin Ver
-            const string &addr = m->source_address();
-            if (!addr.empty()) {
-              for (auto &req : m->requests()) {
-                if (req.from() != 0) {
-                  log->info("new remote address learnt: {0:d}:{1:d} in {2}",
-                    req.cluster_id(), req.from(), addr);
-                  resolver_.AddRemoteAddress(
-                    req.cluster_id(), req.from(), addr);
-                }
-              }
-            }
-            handlers_.handleMessageBatch(std::move(m));
-            // TODO: metrics
-          });
-        conn->SetChunkHandlerPtr(
-          [this](pbSnapshotChunkSPtr m)
-          {
-            // FIXME
-            log->warn("snapshot chunk not supported currently");
-          });
+        conn->SetRequestHandler(bind(&Transport::handleRequest, this, std::placeholders::_1));
+        conn->SetChunkHandler(bind(&Transport::handleSnapshotChunk, this, std::placeholders::_1));
         conn->Start();
       } else if (ec.value() == error::operation_aborted) {
         return;
@@ -166,6 +140,37 @@ Transport::~Transport()
 io_context &Transport::nextIOContext()
 {
   return ioctxs_[ioctxIdx_.fetch_add(1) % ioctxs_.size()]->io;
+}
+
+void Transport::handleRequest(pbMessageBatchUPtr m)
+{
+  if (m->deployment_id() != deploymentID_) {
+    log->warn(
+      "deployment id does not match,"
+      " received {0:d}, actual {1:d}, message dropped",
+      m->deployment_id(), deploymentID_);
+    return;
+  }
+  // FIXME: Check RPC Bin Ver
+  const string &addr = m->source_address();
+  if (!addr.empty()) {
+    for (auto &req : m->requests()) {
+      if (req.from() != 0) {
+        log->info(
+          "new remote address learnt: {0:d}:{1:d} in {2}",
+          req.cluster_id(), req.from(), addr);
+        resolver_.AddRemoteAddress(
+          req.cluster_id(), req.from(), addr);
+      }
+    }
+  }
+  handlers_.handleMessageBatch(std::move(m));
+  // TODO: metrics
+}
+
+void Transport::handleSnapshotChunk(pbSnapshotChunkSPtr m)
+{
+  // FIXME
 }
 
 } // namespace transport

@@ -60,6 +60,8 @@ class Transport {
     std::function<std::string(uint64_t, uint64_t)> &&snapshotDirFunc,
     uint64_t ioContexts);
   boost::asio::io_context &nextIOContext();
+  void handleRequest(pbMessageBatchUPtr m);
+  void handleSnapshotChunk(pbSnapshotChunkSPtr m);
   slogger log;
   boost::asio::io_context io_;
   boost::asio::io_context::work worker_;

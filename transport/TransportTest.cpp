@@ -50,13 +50,8 @@ TEST(Transport, Client)
   Log.GetLogger("transport")->flush();
   transport1->Stop();
   transport2->Stop();
-  transport2.reset();
   transport1.reset();
+  transport2.reset();
   Log.GetLogger("transport")->info("release...");
   ASSERT_EQ(1, 1);
-}
-
-TEST(Transport, Server)
-{
-
 }
