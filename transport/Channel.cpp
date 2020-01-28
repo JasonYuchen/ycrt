@@ -212,8 +212,11 @@ void SendChannel::checkIdle()
 
 void SendChannel::stop()
 {
-  stopped_ = true;
-  socket_.close();
+  if (!stopped_) {
+    stopped_ = true;
+    socket_.close();
+    idleTimer_.cancel();
+  }
 }
 
 RecvChannel::RecvChannel(Transport *tranport, io_context &io)
@@ -352,6 +355,7 @@ void RecvChannel::stop()
   if (!stopped_) {
     stopped_ = true;
     socket_.close();
+    idleTimer_.cancel();
   }
 }
 
