@@ -583,34 +583,36 @@ pbMessageUPtr Raft::makeReplicateMessage(
   uint64_t next,
   uint64_t maxSize)
 {
-  StatusWith<uint64_t> term = logEntry_->Term(next - 1);
-  if (term.Code() == ErrorCode::LogCompacted) {
+  StatusWith<uint64_t> _term = logEntry_->Term(next - 1);
+  if (_term.Code() == ErrorCode::LogCompacted) {
     return nullptr;
   }
-  StatusWith<vector<pbEntry>> entries =
+  uint64_t term = _term.GetOrThrow();
+  StatusWith<vector<pbEntry>> _entries =
     logEntry_->GetEntriesFromStart(next, maxSize);
-  if (term.Code() == ErrorCode::LogCompacted) {
+  if (_entries.Code() == ErrorCode::LogCompacted) {
     return nullptr;
   }
-  if (!entries.Get().empty()) {
-    uint64_t lastIndex = entries.Get().rbegin()->index();
-    uint64_t expected = entries.Get().size() + next - 1;
+  vector<pbEntry> &entries = _entries.GetMutableOrThrow();
+  if (!entries.empty()) {
+    uint64_t lastIndex = entries.rbegin()->index();
+    uint64_t expected = entries.size() + next - 1;
     if (lastIndex != expected) {
       log->critical("{0}: Replicate expected {1}, actual {2}", describe(), expected, lastIndex);
       throw Error(ErrorCode::LogMismatch);
     }
   }
   if (witnesses_.find(to) != witnesses_.end()) {
-    auto meta = makeMetadataEntries(entries.Get());
-    std::swap(entries.GetMutable(), meta);
+    auto meta = makeMetadataEntries(entries);
+    std::swap(entries, meta);
   }
   // TODO: performance?
   auto m = make_unique<pbMessage>();
   m->set_to(to);
   m->set_type(raftpb::Replicate);
   m->set_log_index(next - 1);
-  m->set_log_term(term.Get());
-  for (auto &item : entries.GetMutable()) {
+  m->set_log_term(term);
+  for (auto &item : entries) {
     m->mutable_entries()->Add(std::move(item));
   }
   m->set_commit(logEntry_->Committed());

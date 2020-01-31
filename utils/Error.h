@@ -49,7 +49,7 @@ class Error : public std::runtime_error {
 class Status {
  public:
   Status() : error_(ErrorCode::OK) {}
-  explicit Status(ErrorCode error) : error_(error) {}
+  Status(ErrorCode error) : error_(error) {}
   DEFAULT_COPY_MOVE_AND_ASSIGN(Status);
 
   ErrorCode Code() const { return error_; }
@@ -74,6 +74,8 @@ class StatusWith {
   StatusWith(const Result &r) : result_(r), error_(ErrorCode::OK) {}
   StatusWith(Result &&r) : result_(std::move(r)), error_(ErrorCode::OK) {}
   StatusWith(ErrorCode error) : result_(), error_(error) {}
+  StatusWith(const Status &s) : result_(), error_(s.Code()) {}
+  StatusWith(Status &&s) : result_(), error_(s.Code()) {}
   DEFAULT_COPY_MOVE_AND_ASSIGN(StatusWith);
 
   ErrorCode Code() const { return error_; }
@@ -85,14 +87,14 @@ class StatusWith {
     }
     return true;
   }
-  const Result &Get() const
+  const Result &GetOrThrow() const
   {
     if (!IsOK()) {
       throw Error(error_);
     }
     return result_;
   }
-  Result &GetMutable()
+  Result &GetMutableOrThrow()
   {
     if (!IsOK()) {
       throw Error(error_);

@@ -11,6 +11,7 @@
 
 #include <memory>
 #include <experimental/string_view>
+#include <iostream>
 #include "Error.h"
 #include "Types.h"
 #include "Logger.h"
@@ -88,6 +89,36 @@ class Span {
  private:
   T *start_;
   size_t len_;
+};
+
+class Stopper {
+ public:
+  Stopper() : stopped_(false), workers_() {}
+  void RunWorker(std::function<void()> &&main)
+  {
+    workers_.emplace_back(std::thread(
+      [main=std::move(main)]()
+      {
+        try {
+          main();
+        } catch (std::exception &ex) {
+          std::cerr << "exception caught: " << ex.what() << std::endl;
+        } catch (...) {
+          std::cerr << "unknown exception" << std::endl;
+        }
+      }));
+  }
+  void Stop()
+  {
+    stopped_ = true;
+  }
+  bool ShouldStop()
+  {
+    return stopped_;
+  }
+ private:
+  std::atomic_bool stopped_;
+  std::vector<std::thread> workers_;
 };
 
 } // namespace ycrt

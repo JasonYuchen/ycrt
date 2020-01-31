@@ -57,13 +57,13 @@ struct ReadIndexInfo {
 
 class RaftEventListener {
  public:
-  void LeaderUpdated(const LeaderInfo &info);
-  void CampaignLaunched(const CampaignInfo &info);
-  void CampaignSkipped(const CampaignInfo &info);
-  void SnapshotRejected(const SnapshotInfo &info);
-  void ReplicationRejected(const ReplicationInfo &info);
-  void ProposalDropped(const ProposalInfo &info);
-  void ReadIndexDropped(const ReadIndexInfo &info);
+  void LeaderUpdated(const LeaderInfo &info) {}
+  void CampaignLaunched(const CampaignInfo &info) {}
+  void CampaignSkipped(const CampaignInfo &info) {}
+  void SnapshotRejected(const SnapshotInfo &info) {}
+  void ReplicationRejected(const ReplicationInfo &info) {}
+  void ProposalDropped(const ProposalInfo &info) {}
+  void ReadIndexDropped(const ReadIndexInfo &info) {}
 };
 
 using RaftEventListenerSPtr = std::shared_ptr<RaftEventListener>;
