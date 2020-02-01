@@ -7,6 +7,7 @@
 
 #include <stdexcept>
 #include <spdlog/fmt/fmt.h>
+#include <spdlog/spdlog.h>
 #include "Types.h"
 
 namespace ycrt
@@ -37,11 +38,20 @@ class Error : public std::runtime_error {
     : std::runtime_error(what), code_(code) {}
   Error(ErrorCode code, const std::string &what)
     : std::runtime_error(what), code_(code) {}
+  // format error message
   template<typename S, typename... Args>
   Error(ErrorCode code, const S& format_str, Args&&... args)
     : std::runtime_error(
         fmt::format(format_str, std::forward<Args>(args)...)),
       code_(code) {}
+  // format error message and do log
+  template<typename S, typename... Args>
+  Error(ErrorCode code,
+    std::shared_ptr<spdlog::logger> &logger,
+    const S& format_str, Args&&... args)
+    : std::runtime_error(
+        fmt::format(format_str, std::forward<Args>(args)...)),
+      code_(code) { logger->critical(std::runtime_error::what()); }
  private:
   ErrorCode code_;
 };

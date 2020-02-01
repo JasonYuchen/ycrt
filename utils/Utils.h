@@ -41,50 +41,104 @@ class Span {
   Span(T *start, size_t len) : start_(start), len_(len) {}
   DEFAULT_COPY_MOVE_AND_ASSIGN(Span);
   explicit Span(std::vector<T> &data) : start_(data.data()), len_(data.size()) {}
-  T *begin()
+  T *begin() noexcept
   {
     return start_;
   }
-  const T *cbegin() const
+  const T *begin() const noexcept
   {
     return start_;
   }
-  T *end()
+  const T *cbegin() const noexcept
+  {
+    return start_;
+  }
+  T *end() noexcept
   {
     return start_ + len_;
   }
-  const T *cend()
+  const T *end() const noexcept
   {
     return start_ + len_;
   }
-  size_t size()
+  const T *cend() const noexcept
+  {
+    return start_ + len_;
+  }
+  size_t size() const noexcept
   {
     return len_;
   }
-  T &operator[](size_t idx)
+  bool empty() const noexcept
+  {
+    return len_ == 0;
+  }
+  T &back() noexcept
+  {
+    if (empty()) {
+      throw Error(ErrorCode::OutOfRange);
+    }
+    return start_[len_-1];
+  }
+  const T &back() const noexcept
+  {
+    if (empty()) {
+      throw Error(ErrorCode::OutOfRange);
+    }
+    return start_[len_-1];
+  }
+  T &front() noexcept
+  {
+    if (empty()) {
+      throw Error(ErrorCode::OutOfRange);
+    }
+    return start_[0];
+  }
+  const T &front() const noexcept
+  {
+    if (empty()) {
+      throw Error(ErrorCode::OutOfRange);
+    }
+    return start_[0];
+  }
+  T &operator[](size_t idx) noexcept
   {
     assert(idx < len_);
     return start_[idx];
   }
-  const T &operator[](size_t idx) const
+  const T &operator[](size_t idx) const noexcept
   {
     assert(idx < len_);
     return start_[idx];
   }
-  T *data()
+  T *data() noexcept
   {
     return start_;
   }
-  const T *data() const
+  const T *data() const noexcept
   {
     return start_;
   }
-  Span SubSpan(size_t index, size_t len)
+  Span SubSpan(size_t index) const
+  {
+    if (index > len_) {
+      throw Error(ErrorCode::OutOfRange);
+    }
+    return Span(start_ + index, len_ - index);
+  }
+  Span SubSpan(size_t index, size_t len) const
   {
     if (index + len > len_) {
       throw Error(ErrorCode::OutOfRange);
     }
     return Span(start_ + index, len);
+  }
+  std::vector<T> ToVector() const
+  {
+    std::vector<T> copy;
+    copy.resize(len_);
+    ::memcpy(copy.data(), start_, sizeof(T) * len_);
+    return copy;
   }
  private:
   T *start_;

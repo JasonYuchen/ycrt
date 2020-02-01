@@ -34,7 +34,7 @@ class LogDB {
   StatusWith<uint64_t> Term(uint64_t index) const;
   Status GetEntries(std::vector<pbEntry> &entries,
     uint64_t low, uint64_t high, uint64_t maxSize);
-  pbSnapshotUPtr Snapshot();
+  pbSnapshotSPtr Snapshot();
   Status Compact(uint64_t index);
   Status Append(Span<pbEntry> entries);
  private:
@@ -50,10 +50,12 @@ class LogEntry {
       processed_(logDB_->Range().first - 1)
   {
   }
+
   uint64_t Committed() const
   {
     return committed_;
   }
+
   void SetCommitted(uint64_t committed)
   {
     committed_ = committed;
@@ -202,90 +204,180 @@ class LogEntry {
   std::vector<pbEntry> GetEntriesToApply(
     uint64_t limit = settings::Soft::ins().MaxEntrySize) const
   {
-    return std::vector<pbEntry>();
+    if (HasEntriesToApply()) {
+      return GetEntriesWithBound(
+        firstNotAppliedIndex(), toApplyIndexLimit(), limit).GetOrThrow();
+    }
+    return {};
   }
 
   std::vector<pbEntry> GetEntriesToSave() const
   {
-    return std::vector<pbEntry>();
+    return inMem_.GetEntriesToSave();
   }
 
-  pbSnapshotUPtr GetSnapshot() const
+  pbSnapshotSPtr GetSnapshot() const
   {
-    return ycrt::pbSnapshotUPtr();
-  }
-
-  uint64_t GetFirstNotAppliedIndex() const
-  {
-    return 0;
-  }
-
-  uint64_t GetToApplyIndexLimit() const
-  {
-    return 0;
+    if (inMem_.HasSnapshot()) {
+      return inMem_.GetSnapshot();
+    }
+    return logDB_->Snapshot();
   }
 
   bool HasEntriesToApply() const
   {
-    return false;
+    return toApplyIndexLimit() > firstNotAppliedIndex();
   }
 
   bool HasMoreEntriesToApply(uint64_t appliedTo) const
   {
+    return committed_ > appliedTo;
+  }
+
+  bool TryAppend(uint64_t index, const Span<pbEntry> entries)
+  {
+    uint64_t conflictIndex = getConflictIndex(entries);
+    if (conflictIndex != 0) {
+      if (conflictIndex <= committed_) {
+        throw Error(ErrorCode::LogMismatch, log,
+          "try append conflicts with committed entries, "
+          "conflictIndex={0}, committed={1}", conflictIndex, committed_);
+      }
+      // index = m.log_index() = remote.Next-1 (see Raft::makeReplicateMessage)
+      Append(entries.SubSpan(conflictIndex - index - 1));
+    }
     return false;
   }
 
-  bool TryAppend(uint64_t index, Span<pbEntry> entries)
+  void Append(const Span<pbEntry> entries)
   {
-    return false;
-  }
-
-  void Append(Span<pbEntry> entries)
-  {
-
-  }
-
-  uint64_t GetConflictIndex(Span<pbEntry> entries) const
-  {
-    return 0;
+    if (entries.empty()) {
+      return;
+    }
+    if (entries[0].index() <= committed_) {
+      throw Error(ErrorCode::LogMismatch, log,
+        "append conflicts with committed entries, "
+        "first={0}, committed={1}", entries[0].index(), committed_);
+    }
+    inMem_.Merge(entries);
   }
 
   void CommitTo(uint64_t index)
   {
-
+    if (index <= committed_) {
+      return;
+    }
+    if (index > LastIndex()) {
+      throw Error(ErrorCode::OutOfRange, log,
+        "commit to {0}, but last index={1}", index, LastIndex());
+    }
+    committed_ = index;
   }
 
-  void CommitUpdate(/*pb.UpdateCommit*/)
+  void CommitUpdate(const pbUpdateCommit &uc)
   {
-
+    inMem_.CommitUpdate(uc);
+    if (uc.Processed > 0) {
+      if (uc.Processed < processed_ || uc.Processed > committed_) {
+        throw Error(ErrorCode::OutOfRange, log,
+          "invalid UpdateCommit, uc.Processed={0} "
+          "but processed={1}, committed={2}",
+          uc.Processed, processed_, committed_);
+      }
+      processed_ = uc.Processed;
+    }
+    if (uc.LastApplied > 0) {
+      if (uc.LastApplied > processed_ || uc.LastApplied > committed_) {
+        throw Error(ErrorCode::OutOfRange, log,
+          "invalid UpdateCommit, uc.LastApplied={0} "
+          "but processed={1}, committed={2}",
+          uc.LastApplied, processed_, committed_);
+      }
+      inMem_.AppliedLogTo(uc.LastApplied);
+    }
   }
 
   bool MatchTerm(uint64_t index, uint64_t term) const
   {
-    return false;
+    auto t = Term(index);
+    if (!t.IsOK()) {
+      return false;
+    }
+    return t.GetOrThrow() == term;
   }
 
+  // is remote node uptodate:
+  // remote term > local term
+  // or
+  // remote term == local last term && remote index >= local last index
   bool IsUpToDate(uint64_t index, uint64_t term) const
   {
+    uint64_t lastTerm = LastTerm();
+    if (term >= lastTerm) {
+      if (term > lastTerm) {
+        return true;
+      }
+      return index >= LastIndex();
+    }
     return false;
   }
 
   bool TryCommit(uint64_t index, uint64_t term)
   {
+    if (index <= committed_) {
+      return false;
+    }
+    auto _term = Term(index);
+    if (!_term.IsOK() && _term.Code() != ErrorCode::LogCompacted) {
+      _term.IsOKOrThrow();
+    }
+    if (index > committed_ && term == _term.GetOrDefault(0)) {
+      CommitTo(index);
+      return true;
+    }
     return false;
   }
 
+  // FIXME: change arg to pbSnapshotSPtr
   void Restore(const pbSnapshot &s)
   {
-
+    inMem_.Restore(std::make_shared<pbSnapshot>(s));
+    committed_ = s.index();
+    processed_ = s.index();
   }
 
-  void InMemoryGC()
+  void InMemoryResize()
   {
+    inMem_.Resize();
+  }
 
+  void InMemoryTryResize()
+  {
+    inMem_.TryResize();
   }
 
  private:
+  uint64_t firstNotAppliedIndex() const
+  {
+    return std::max(processed_ + 1, FirstIndex());
+  }
+
+  uint64_t toApplyIndexLimit() const
+  {
+    // uncommitted log can not be applied
+    return committed_ + 1;
+  }
+
+  uint64_t getConflictIndex(const Span<pbEntry> entries) const
+  {
+    for (const auto &ent : entries) {
+      if (!MatchTerm(ent.index(), ent.term())) {
+        return ent.index();
+      }
+    }
+    return 0;
+  }
+
   Status appendEntriesFromLogDB(std::vector<pbEntry> &entries,
     uint64_t low, uint64_t high, uint64_t maxSize) const
   {

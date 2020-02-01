@@ -14,8 +14,8 @@ namespace ycrt
 namespace raft
 {
 inline void CheckEntriesToAppend(
-  const std::vector<pbEntry> &existing,
-  const std::vector<pbEntry> &append)
+  const Span<pbEntry> existing,
+  const Span<pbEntry> append)
 {
   if (existing.empty() || append.empty()) {
     return;

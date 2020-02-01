@@ -75,13 +75,7 @@ class InMemory {
   void GetEntries(std::vector<pbEntry> &entries,
     uint64_t low, uint64_t high) const
   {
-    uint64_t upperBound = markerIndex_ + entries_.size();
-    if (low > high || low < markerIndex_ || high > upperBound) {
-      throw Error(ErrorCode::OutOfRange,
-        "InMemory: invalid range for entries, low={0}, high={1}, marker={2},"
-        " upperBound={3}", low, high, markerIndex_, upperBound);
-    }
-    uint64_t size = 0;
+    CheckBound(low, high);
     auto st = entries_.begin() + low - markerIndex_;
     auto ed = entries_.begin() + high - markerIndex_;
     entries.insert(entries.end(), st, ed);
@@ -107,6 +101,11 @@ class InMemory {
   bool HasSnapshot() const
   {
     return snapshot_ != nullptr;
+  }
+
+  pbSnapshotSPtr GetSnapshot() const
+  {
+    return snapshot_;
   }
 
   StatusWith<uint64_t> GetSnapshotIndex() const
@@ -162,8 +161,7 @@ class InMemory {
     }
   }
 
-  // use Span?
-  std::vector<pbEntry> EntriesToSave() const
+  std::vector<pbEntry> GetEntriesToSave() const
   {
     uint64_t index = savedTo_ + 1;
     if (index - markerIndex_ > entries_.size()) {
@@ -225,7 +223,7 @@ class InMemory {
   void Resize()
   {
     shrunk_ = false;
-    newEntrySlice(entries_);
+    entries_.shrink_to_fit();
   }
 
   void TryResize()
@@ -243,13 +241,13 @@ class InMemory {
     }
   }
 
-  void Merge(const std::vector<pbEntry> &ents)
+  void Merge(const Span<pbEntry> ents)
   {
     uint64_t firstNewIndex = ents[0].index();
     ResizeEntrySlice();
     if (firstNewIndex == markerIndex_ + entries_.size()) {
       // |2(snapshot)| |3 4 5 6 7 8| + |9 10 11 ...|, do append
-      CheckEntriesToAppend(entries_, ents);
+      CheckEntriesToAppend(Span<pbEntry>(entries_), ents);
       entries_.insert(entries_.end(), ents.begin(), ents.end());
       // FIXME: rate limit
     } else if (firstNewIndex <= markerIndex_) {
@@ -257,14 +255,14 @@ class InMemory {
       // |2(snapshot)| |3(empty, marker)| + |3 4 5|, do append
       markerIndex_ = firstNewIndex;
       shrunk_ = false;
-      entries_ = ents; // copy
+      entries_ = ents.ToVector(); // copy
       savedTo_ = firstNewIndex - 1;
       // FIXME: rate limit
     } else {
-      // |3 4 5 6 7 8| + |5 6 9 10|, do conficts resolution
+      // |3 4 5 6 7 8| + |5 6 7 8|, do conficts resolution
       std::vector<pbEntry> existing;
       GetEntries(existing, markerIndex_, firstNewIndex);
-      CheckEntriesToAppend(entries_, ents);
+      CheckEntriesToAppend(Span<pbEntry>(entries_), ents);
       shrunk_ = false;
       entries_.swap(existing); // ?
       entries_.insert(entries_.end(), ents.begin(), ents.end());
@@ -273,22 +271,16 @@ class InMemory {
     CheckMarkerIndex();
   }
 
-  void Restore(const pbSnapshot &s)
+  void Restore(pbSnapshotSPtr s)
   {
-    snapshot_ = std::make_unique<pbSnapshot>(s);
-    markerIndex_ = s.index() + 1;
-    appliedToIndex_ = s.index();
-    appliedToTerm_ = s.term();
+    markerIndex_ = s->index() + 1;
+    appliedToIndex_ = s->index();
+    appliedToTerm_ = s->term();
     shrunk_ = false;
     entries_.clear();
-    savedTo_ = s.index();
+    savedTo_ = s->index();
+    snapshot_ = std::move(s);
     // FIXME: rate limit
-  }
-
-  void newEntrySlice(std::vector<pbEntry> &ents)
-  {
-    // FIXME
-    ents.reserve(std::max(entrySliceSize_, ents.size()));
   }
 
  private:
@@ -296,7 +288,7 @@ class InMemory {
   uint64_t entrySliceSize_;
   uint64_t minEntrySliceFreeSize_;
   bool shrunk_;
-  pbSnapshotUPtr snapshot_;
+  pbSnapshotSPtr snapshot_;
   std::vector<pbEntry> entries_;
   uint64_t markerIndex_;
   uint64_t appliedToIndex_;
