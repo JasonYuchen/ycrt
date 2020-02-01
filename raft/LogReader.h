@@ -48,7 +48,7 @@ class LogReader {
   std::pair<pbStateSPtr, pbMembershipSPtr> NodeState()
   {
     std::unique_lock<std::mutex> guard(mutex_);
-    return {state_, snapshot_->membership()}; // FIXME
+    return {state_, std::make_shared<pbMembership>(snapshot_->membership())}; // FIXME
   }
 
   void SetNodeState(const pbState &state);
@@ -59,7 +59,7 @@ class LogReader {
   Status GetEntries(std::vector<pbEntry> &entries,
     uint64_t low, uint64_t high, uint64_t maxSize)
   {
-
+    // TODO
   }
 
   pbSnapshotSPtr Snapshot();
@@ -91,7 +91,7 @@ class LogReader {
   uint64_t nodeID_;
   const std::string cn_;
   LogDBSPtr logdb_;
-  pbState state_;
+  pbStateSPtr state_;
   pbSnapshotSPtr snapshot_;
   uint64_t markerIndex_; // different from that of InMemory::markerIndex
   uint64_t markerTerm_;

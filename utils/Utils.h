@@ -147,14 +147,19 @@ class Span {
 
 class Stopper {
  public:
-  Stopper() : stopped_(false), workers_() {}
-  void RunWorker(std::function<void()> &&main)
+  explicit Stopper(const std::string &name = "unknown")
+    : name_(name), stopped_(false), workers_() {}
+  // not thread safe
+  void RunWorker(std::function<void(std::atomic_bool&)> &&main)
   {
+    if (stopped_) {
+      return;
+    }
     workers_.emplace_back(std::thread(
-      [main=std::move(main)]()
+      [this, main=std::move(main)]()
       {
         try {
-          main();
+          main(stopped_);
         } catch (std::exception &ex) {
           std::cerr << "exception caught: " << ex.what() << std::endl;
         } catch (...) {
@@ -162,15 +167,25 @@ class Stopper {
         }
       }));
   }
+  // not thread safe
+  uint64_t WorkerCount() const
+  {
+    return workers_.size();
+  }
   void Stop()
   {
-    stopped_ = true;
+    if (!stopped_.exchange(true)) {
+      for (auto &t : workers_) {
+        t.join();
+      }
+    }
   }
-  bool ShouldStop()
+  ~Stopper()
   {
-    return stopped_;
+    Stop();
   }
  private:
+  const std::string name_;
   std::atomic_bool stopped_;
   std::vector<std::thread> workers_;
 };
