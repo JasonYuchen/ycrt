@@ -25,7 +25,7 @@ class Peer {
   };
   static std::unique_ptr<Peer> Launch(
     const Config &config,
-    LogDBUPtr logdb,
+    LogReaderSPtr logdb,
     server::RaftEventListenerSPtr listener,
     std::vector<PeerInfo> &peers,
     bool initial,
@@ -109,7 +109,7 @@ class Peer {
   bool HasEntryToApply();
  private:
   Peer(const Config &config,
-    LogDBUPtr logdb,
+    LogReaderSPtr logdb,
     server::RaftEventListenerSPtr listener,
     std::vector<PeerInfo> &peers,
     bool initial,

@@ -43,7 +43,7 @@ class Raft {
     bool IsLeader() { return NodeState == Leader; }
     bool IsFollower() { return NodeState == Follower; }
   };
-  Raft(const Config &config, LogDBUPtr logdb);
+  Raft(const Config &config, LogReaderSPtr logdb);
   Status GetLocalStatus();
   void Handle(pbMessage &&m);
   void Handle(pbMessage &m);
@@ -52,7 +52,7 @@ class Raft {
   void initializeHandlerMap();
 
   // status
-  std::string describe();
+  std::string describe() const noexcept;
   pbState raftState();
   void loadState(const pbStateSPtr &state);
   void setLeaderID(uint64_t leader);
@@ -209,7 +209,7 @@ class Raft {
   slogger log;
   uint64_t clusterID_;
   uint64_t nodeID_;
-  std::string cn_; // for output purpose, [clusterID_:nodeID_], e.g. [1:5]
+  const std::string cn_;
   uint64_t leaderID_;
   uint64_t leaderTransferTargetID_;
   bool isLeaderTransferTarget_;

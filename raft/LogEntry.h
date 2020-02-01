@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include "pb/RaftMessage.h"
 #include "InMemory.h"
+#include "LogReader.h"
 #include "utils/Utils.h"
 #include "LogEntryUtils.h"
 
@@ -23,27 +24,27 @@ namespace raft
 // allow the raft package to access raft state, entries, snapshots stored in
 // the persistent storage. Entries stored in the persistent storage accessible
 // via ILogDB is usually not required in normal cases.
-class LogDB {
- public:
-  std::pair<uint64_t, uint64_t> Range() const;
-  void SetRange(uint64_t index, uint64_t length);
-  std::pair<pbStateSPtr, pbMembershipSPtr> NodeState() const;
-  void SetNodeState(pbStateSPtr);
-  Status CreateSnapshot(pbSnapshotUPtr);
-  Status ApplySnapshot(pbSnapshotUPtr);
-  StatusWith<uint64_t> Term(uint64_t index) const;
-  Status GetEntries(std::vector<pbEntry> &entries,
-    uint64_t low, uint64_t high, uint64_t maxSize);
-  pbSnapshotSPtr Snapshot();
-  Status Compact(uint64_t index);
-  Status Append(Span<pbEntry> entries);
- private:
-};
-using LogDBUPtr = std::unique_ptr<LogDB>;
+//class LogDB {
+// public:
+//  std::pair<uint64_t, uint64_t> Range() const;
+//  void SetRange(uint64_t index, uint64_t length);
+//  std::pair<pbStateSPtr, pbMembershipSPtr> NodeState() const;
+//  void SetNodeState(pbStateSPtr);
+//  Status CreateSnapshot(pbSnapshotUPtr);
+//  Status ApplySnapshot(pbSnapshotUPtr);
+//  StatusWith<uint64_t> Term(uint64_t index) const;
+//  Status GetEntries(std::vector<pbEntry> &entries,
+//    uint64_t low, uint64_t high, uint64_t maxSize);
+//  pbSnapshotSPtr Snapshot();
+//  Status Compact(uint64_t index);
+//  Status Append(Span<pbEntry> entries);
+// private:
+//};
+//using LogDBUPtr = std::unique_ptr<LogDB>;
 
 class LogEntry {
  public:
-  explicit LogEntry(LogDBUPtr logDB)
+  explicit LogEntry(LogReaderSPtr logDB)
     : logDB_(std::move(logDB)),
       inMem_(logDB_->Range().second),
       committed_(logDB_->Range().first - 1),
@@ -392,7 +393,7 @@ class LogEntry {
   }
 
   slogger log;
-  LogDBUPtr logDB_;
+  LogReaderSPtr logDB_;
   InMemory inMem_;
   uint64_t committed_;
   uint64_t processed_;

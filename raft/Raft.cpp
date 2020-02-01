@@ -16,11 +16,11 @@ namespace raft
 
 using namespace std;
 
-Raft::Raft(const Config &config, LogDBUPtr logdb)
+Raft::Raft(const Config &config, LogReaderSPtr logdb)
   : log(Log.GetLogger("raft")),
     clusterID_(config.ClusterID),
     nodeID_(config.NodeID),
-    cn_(fmt::format("[{0:05d}:{1:05d}]", clusterID_, nodeID_)),
+    cn_(FmtClusterNode(clusterID_, nodeID_)),
     leaderID_(NoLeader),
     leaderTransferTargetID_(NoLeader),
     isLeaderTransferTarget_(false),
@@ -178,7 +178,7 @@ void Raft::initializeHandlerMap()
   handlers_[Witness][raftpb::SnapshotReceived] = &Raft::handleRestoreRemote;
 }
 
-string Raft::describe()
+string Raft::describe() const noexcept
 {
   uint64_t lastIndex = logEntry_->LastIndex();
   StatusWith<uint64_t> term = logEntry_->Term(lastIndex);

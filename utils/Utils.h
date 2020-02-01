@@ -175,6 +175,12 @@ class Stopper {
   std::vector<std::thread> workers_;
 };
 
+// for output purpose, [clusterID_:nodeID_], e.g. [00001:00005]
+inline std::string FmtClusterNode(uint64_t clusterID, uint64_t nodeID)
+{
+  return fmt::format("[{0:05d}:{1:05d}]", clusterID, nodeID);
+}
+
 } // namespace ycrt
 
 #endif //YCRT_UTILS_UTILS_H_

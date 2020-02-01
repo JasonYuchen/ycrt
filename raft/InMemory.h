@@ -42,7 +42,7 @@ class InMemory {
       savedTo_(lastIndex)
   {}
 
-  uint64_t GetMarkerIndex() const
+  uint64_t GetMarkerIndex() const noexcept
   {
     return markerIndex_;
   }
@@ -67,7 +67,7 @@ class InMemory {
     }
   }
 
-  size_t GetEntriesSize() const
+  size_t GetEntriesSize() const noexcept
   {
     return entries_.size();
   }
@@ -98,17 +98,17 @@ class InMemory {
     entries.insert(entries.end(), st, ed);
   }
 
-  bool HasSnapshot() const
+  bool HasSnapshot() const noexcept
   {
     return snapshot_ != nullptr;
   }
 
-  pbSnapshotSPtr GetSnapshot() const
+  pbSnapshotSPtr GetSnapshot() const noexcept
   {
     return snapshot_;
   }
 
-  StatusWith<uint64_t> GetSnapshotIndex() const
+  StatusWith<uint64_t> GetSnapshotIndex() const noexcept
   {
     if (snapshot_) {
       return snapshot_->index();
@@ -117,7 +117,7 @@ class InMemory {
     }
   }
 
-  StatusWith<uint64_t> GetLastIndex() const
+  StatusWith<uint64_t> GetLastIndex() const noexcept
   {
     if (!entries_.empty()) {
       return entries_.back().index();
@@ -151,7 +151,7 @@ class InMemory {
     }
   }
 
-  void CommitUpdate(const pbUpdateCommit &commit)
+  void CommitUpdate(const pbUpdateCommit &commit) noexcept
   {
     if (commit.StableLogTo > 0) {
       savedLogTo(commit.StableLogTo, commit.StableLogTerm);
@@ -170,7 +170,7 @@ class InMemory {
     return {entries_.begin() + index - markerIndex_, entries_.end()};
   }
 
-  void savedLogTo(uint64_t index, uint64_t term)
+  void savedLogTo(uint64_t index, uint64_t term) noexcept
   {
     if (index < markerIndex_) {
       return;
@@ -185,7 +185,7 @@ class InMemory {
     savedTo_ = index;
   }
 
-  void savedSnapshotTo(uint64_t index)
+  void savedSnapshotTo(uint64_t index) noexcept
   {
     if (snapshot_ && snapshot_->index() == index) {
       snapshot_.reset();
@@ -223,7 +223,11 @@ class InMemory {
   void Resize()
   {
     shrunk_ = false;
-    entries_.shrink_to_fit();
+    if (entries_.size() > entrySliceSize_) {
+      entries_.shrink_to_fit();
+    } else {
+      entries_.reserve(entrySliceSize_);
+    }
   }
 
   void TryResize()
