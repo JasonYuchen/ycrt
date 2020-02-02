@@ -25,6 +25,7 @@ enum class ErrorCode : uint32_t {
   LogUnavailable,
   LogMismatch,
   SnapshotUnavailable,
+  SnapshotOutOfDate,
   UnexpectedRaftState,
   UnexpectedRaftMessage,
   InvalidReadIndex,

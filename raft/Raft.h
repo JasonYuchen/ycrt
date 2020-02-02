@@ -52,9 +52,9 @@ class Raft {
   void initializeHandlerMap();
 
   // status
-  std::string describe() const noexcept;
+  std::string describe() const;
   pbState raftState();
-  void loadState(const pbStateSPtr &state);
+  void loadState(const pbState &state);
   void setLeaderID(uint64_t leader);
   bool isFollower();
   bool isPreCandidate();

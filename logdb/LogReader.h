@@ -1,0 +1,272 @@
+//
+// Created by jason on 2020/2/1.
+//
+
+#ifndef YCRT_RAFT_LOGREADER_H_
+#define YCRT_RAFT_LOGREADER_H_
+
+#include <stdint.h>
+#include <vector>
+#include <memory>
+#include <mutex>
+#include "utils/Utils.h"
+#include "pb/RaftMessage.h"
+
+namespace ycrt
+{
+
+namespace logdb
+{
+
+// actual persistent log manager (backed up by RocksDB)
+class LogDBContext {
+ public:
+  void Destroy();
+  void Reset();
+  // TODO
+};
+
+class LogDB {
+ public:
+  const std::string &Name() const;
+  void Close();
+  uint32_t BinaryFormat() const;
+  // TODO
+};
+using LogDBSPtr = std::shared_ptr<LogDB>;
+
+// LogReader is a read-only interface to the underlying persistent storage to
+// allow the raft package to access raft state, entries, snapshots stored in
+// the persistent storage. Entries stored in the persistent storage accessible
+// via LogReader is usually not required in normal cases.
+class LogReader {
+ public:
+  static std::unique_ptr<LogReader> New(uint64_t clusterID, uint64_t nodeID, LogDBSPtr logdb)
+  {
+    std::unique_ptr<LogReader> reader(new LogReader(clusterID, nodeID, std::move(logdb)));
+    return reader;
+  }
+
+  // GetRange returns the range of the entries in LogReader.
+  std::pair<uint64_t, uint64_t> GetRange()
+  {
+    std::unique_lock<std::mutex> guard(mutex_);
+    return {firstIndex(), lastIndex()};
+  }
+
+  // SetRange updates the LogReader to reflect what is available in it.
+  void SetRange(uint64_t index, uint64_t length)
+  {
+    if (length == 0) {
+      return;
+    }
+    std::unique_lock<std::mutex> guard(mutex_);
+    uint64_t curfirst = firstIndex();
+    uint64_t setlast = index + length - 1;
+    // current range includes the [index, index+length)
+    if (setlast < curfirst) {
+      return;
+    }
+    // overlap
+    if (curfirst > index) {
+      length -= curfirst - index;
+      index = curfirst;
+    }
+    uint64_t offset = index - markerIndex_;
+    if (length_ > offset) {
+      length_ = offset + length;
+    } else if (length_ == offset) {
+      length_ += length;
+    } else {
+      // curfirst < index, log hole found
+      throw Error(ErrorCode::LogMismatch, log,
+        "SetRange: hole found, current first index={0} < set index={1}"
+        , curfirst, index);
+    }
+  }
+
+  // GetNodeState returns the persistent state of the node
+  pbState GetNodeState()
+  {
+    std::unique_lock<std::mutex> guard(mutex_);
+    return state_; // FIXME
+  }
+
+  // SetNodeState sets the persistent state known to LogReader.
+  void SetNodeState(const pbState &state)
+  {
+    std::unique_lock<std::mutex> gurad(mutex_);
+    state_ = state;
+  }
+
+  // GetSnapshot returns the metadata for the most recent snapshot known to the
+  // LogReader.
+  pbSnapshotSPtr GetSnapshot()
+  {
+    std::unique_lock<std::mutex> guard(mutex_);
+    return snapshot_;
+  }
+
+  // SetSnapshot makes the snapshot known to LogReader,
+  // keeps the metadata of the specified snapshot.
+  Status SetSnapshot(pbSnapshotSPtr s)
+  {
+    std::unique_lock<std::mutex> guard(mutex_);
+    if (snapshot_->index() >= s->index()) {
+      return ErrorCode::SnapshotOutOfDate;
+    }
+    snapshot_ = std::move(s);
+    return ErrorCode::OK;
+  }
+
+  // ApplySnapshot makes the snapshot known to LogReader,
+  // updates the entry range known to LogReader (apply the specified snapshot).
+  Status ApplySnapshot(pbSnapshotSPtr s)
+  {
+    std::unique_lock<std::mutex> guard(mutex_);
+    if (snapshot_->index() >= s->index()) {
+      return ErrorCode::SnapshotOutOfDate;
+    }
+    markerIndex_ = s->index();
+    markerTerm_ = s->term();
+    length_ = 1;
+    snapshot_ = std::move(s);
+    return ErrorCode::OK;
+  }
+
+  // Term returns the corresponding entry term of a specified entry index
+  StatusWith<uint64_t> Term(uint64_t index)
+  {
+    std::unique_lock<std::mutex> guard(mutex_);
+    return term(index);
+  }
+
+  // GetEntries returns entries between [low, high) with total size of entries
+  // limited to maxSize bytes.
+  Status GetEntries(std::vector<pbEntry> &entries,
+    uint64_t low, uint64_t high, uint64_t maxSize)
+  {
+    std::unique_lock<std::mutex> guard(mutex_);
+    return getEntries(entries, low, high, maxSize);
+  }
+
+  // Compact performs entry range compaction on LogReader up to the entry
+  // specified by index.
+  Status Compact(uint64_t index)
+  {
+    std::unique_lock<std::mutex> guard(mutex_);
+    if (index < markerIndex_) {
+      return ErrorCode::LogCompacted;
+    }
+    if (index > lastIndex()) {
+      return ErrorCode::LogUnavailable;
+    }
+    auto _term = term(index);
+    if (!_term.IsOK()) {
+      return _term.Code();
+    }
+    length_ -= index - markerIndex_;
+    markerIndex_ = index;
+    markerTerm_ = _term.GetOrThrow();
+    return ErrorCode::OK;
+  }
+
+  // Append marks the specified entries as persisted and make them available
+  // from logreader. This is not how entries are persisted.
+  Status Append(Span<pbEntry> entries)
+  {
+    if (entries.empty()) {
+      return ErrorCode::OK;
+    }
+    if (entries.front().index()+entries.size()-1 != entries.back().index()) {
+      throw Error(ErrorCode::LogMismatch, log, "LogReader::Append: gap found");
+    }
+    SetRange(entries.front().index(), entries.size());
+    return ErrorCode::OK;
+  }
+ private:
+  LogReader(uint64_t clusterID, uint64_t nodeID, LogDBSPtr logdb)
+    : mutex_(),
+      clusterID_(clusterID),
+      nodeID_(nodeID),
+      cn_(FmtClusterNode(clusterID_, nodeID_)),
+      logdb_(std::move(logdb)),
+      state_(),
+      snapshot_(),
+      markerIndex_(0),
+      markerTerm_(0),
+      length_(1)
+  {}
+
+  std::string describe() const
+  {
+    return fmt::format(
+      "LogReader[markerIndex={0},markerTerm={1},length={2}] {3}",
+      markerIndex_, markerTerm_, length_, cn_);
+  }
+
+  // assume locked
+  uint64_t firstIndex() const
+  {
+    return markerIndex_ + 1;
+  }
+
+  // assume locked
+  uint64_t lastIndex() const
+  {
+    return markerIndex_ + length_ - 1;
+  }
+
+  // assume locked
+  StatusWith<uint64_t> term(uint64_t index) const
+  {
+    if (index == markerIndex_) {
+      return markerTerm_;
+    }
+    std::vector<pbEntry> entries;
+    Status s = getEntries(entries, index, index + 1, 0);
+    if (!s.IsOK()) {
+      return s;
+    }
+    if (entries.empty()) {
+      return 0;
+    } else {
+      return entries[0].term();
+    }
+  }
+
+  // assume locked
+  Status getEntries(std::vector<pbEntry> &entries,
+    uint64_t low, uint64_t high, uint64_t maxSize) const
+  {
+    if (low > high) {
+      return ErrorCode::OutOfRange;
+    }
+    if (low <= markerIndex_) {
+      return ErrorCode::LogCompacted;
+    }
+    if (high > lastIndex()+1) {
+      return ErrorCode::LogUnavailable;
+    }
+  }
+
+  slogger log;
+  std::mutex mutex_;
+  uint64_t clusterID_;
+  uint64_t nodeID_;
+  const std::string cn_;
+  LogDBSPtr logdb_;
+  pbState state_;
+  pbSnapshotSPtr snapshot_;
+  uint64_t markerIndex_; // different from that of InMemory::markerIndex
+  uint64_t markerTerm_;
+  uint64_t length_; // initialized to 1 representing the dummy entry
+
+};
+using LogReaderSPtr = std::shared_ptr<LogReader>;
+
+} // namespace logdb
+
+} // namespace ycrt
+
+#endif //YCRT_RAFT_LOGREADER_H_

@@ -9,8 +9,8 @@
 #include <memory>
 #include <stdint.h>
 #include "pb/RaftMessage.h"
-#include "InMemory.h"
-#include "LogReader.h"
+#include "logdb/InMemory.h"
+#include "logdb/LogReader.h"
 #include "utils/Utils.h"
 #include "LogEntryUtils.h"
 
@@ -44,11 +44,11 @@ namespace raft
 
 class LogEntry {
  public:
-  explicit LogEntry(LogReaderSPtr logDB)
+  explicit LogEntry(logdb::LogReaderSPtr logDB)
     : logDB_(std::move(logDB)),
-      inMem_(logDB_->Range().second),
-      committed_(logDB_->Range().first - 1),
-      processed_(logDB_->Range().first - 1)
+      inMem_(logDB_->GetRange().second),
+      committed_(logDB_->GetRange().first - 1),
+      processed_(logDB_->GetRange().first - 1)
   {
   }
 
@@ -73,7 +73,7 @@ class LogEntry {
     if (index.IsOK()) {
       return index.GetOrThrow() + 1;
     }
-    return logDB_->Range().first;
+    return logDB_->GetRange().first;
   }
 
   uint64_t LastIndex() const
@@ -82,7 +82,7 @@ class LogEntry {
     if (index.IsOK()) {
       return index.GetOrThrow();
     }
-    return logDB_->Range().second;
+    return logDB_->GetRange().second;
   }
 
   StatusWith<std::pair<uint64_t, uint64_t>> EntryRange() const
@@ -176,7 +176,7 @@ class LogEntry {
       appendEntriesFromLogDB(entries, low, high, maxSize);
     } else {
       // retrieve from logDB then inMem
-      auto entsdb = appendEntriesFromLogDB(entries, low, inMemoryMarker, maxSize);
+      Status entsdb = appendEntriesFromLogDB(entries, low, inMemoryMarker, maxSize);
       if (!entsdb.IsOK()) {
         return entsdb;
       }
@@ -222,7 +222,7 @@ class LogEntry {
     if (inMem_.HasSnapshot()) {
       return inMem_.GetSnapshot();
     }
-    return logDB_->Snapshot();
+    return logDB_->GetSnapshot();
   }
 
   bool HasEntriesToApply() const
@@ -246,6 +246,7 @@ class LogEntry {
       }
       // index = m.log_index() = remote.Next-1 (see Raft::makeReplicateMessage)
       Append(entries.SubSpan(conflictIndex - index - 1));
+      return true;
     }
     return false;
   }
@@ -393,8 +394,8 @@ class LogEntry {
   }
 
   slogger log;
-  LogReaderSPtr logDB_;
-  InMemory inMem_;
+  logdb::LogReaderSPtr logDB_;
+  logdb::InMemory inMem_;
   uint64_t committed_;
   uint64_t processed_;
 };

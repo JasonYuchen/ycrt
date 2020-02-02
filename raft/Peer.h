@@ -118,7 +118,7 @@ class Peer {
       raft_(),
       prevState_()
   {
-    auto index = logdb->Range();
+    auto index = logdb->GetRange();
     raft_.reset(new Raft(config, std::move(logdb)));
     raft_->listener_ = std::move(listener);
     if (newNode && !config.IsObserver && !config.IsWitness) {

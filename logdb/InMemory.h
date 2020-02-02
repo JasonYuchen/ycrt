@@ -9,12 +9,12 @@
 #include "pb/RaftMessage.h"
 #include "utils/Utils.h"
 #include "settings/Soft.h"
-#include "LogEntryUtils.h"
+#include "raft/LogEntryUtils.h"
 
 namespace ycrt
 {
 
-namespace raft
+namespace logdb
 {
 
 // inMemory is a two stage in memory log storage struct to keep log entries
@@ -27,6 +27,27 @@ namespace raft
 //              markerIndex  savedTo
 //
 //
+
+// for checking log entry continuity
+inline void CheckEntriesToAppend(
+  const Span<pbEntry> existing,
+  const Span<pbEntry> append)
+{
+  if (existing.empty() || append.empty()) {
+    return;
+  }
+  if (existing.back().index() + 1 != append.front().index()) {
+    throw Error(ErrorCode::LogMismatch,
+      "found a hold, exist {0}, append {1}",
+      existing.back().index(), append.front().index());
+  }
+  if (existing.back().term() > append.front().term()) {
+    throw Error(ErrorCode::LogMismatch,
+      "unexpected term, ecist {0}, append {1}",
+      existing.back().term(), append.front().term());
+  }
+}
+
 class InMemory {
  public:
   explicit InMemory(uint64_t lastIndex)
@@ -42,7 +63,7 @@ class InMemory {
       savedTo_(lastIndex)
   {}
 
-  uint64_t GetMarkerIndex() const noexcept
+  uint64_t GetMarkerIndex() const
   {
     return markerIndex_;
   }
@@ -67,7 +88,7 @@ class InMemory {
     }
   }
 
-  size_t GetEntriesSize() const noexcept
+  size_t GetEntriesSize() const
   {
     return entries_.size();
   }
@@ -98,17 +119,17 @@ class InMemory {
     entries.insert(entries.end(), st, ed);
   }
 
-  bool HasSnapshot() const noexcept
+  bool HasSnapshot() const
   {
     return snapshot_ != nullptr;
   }
 
-  pbSnapshotSPtr GetSnapshot() const noexcept
+  pbSnapshotSPtr GetSnapshot() const
   {
     return snapshot_;
   }
 
-  StatusWith<uint64_t> GetSnapshotIndex() const noexcept
+  StatusWith<uint64_t> GetSnapshotIndex() const
   {
     if (snapshot_) {
       return snapshot_->index();
@@ -117,7 +138,7 @@ class InMemory {
     }
   }
 
-  StatusWith<uint64_t> GetLastIndex() const noexcept
+  StatusWith<uint64_t> GetLastIndex() const
   {
     if (!entries_.empty()) {
       return entries_.back().index();
@@ -151,7 +172,7 @@ class InMemory {
     }
   }
 
-  void CommitUpdate(const pbUpdateCommit &commit) noexcept
+  void CommitUpdate(const pbUpdateCommit &commit)
   {
     if (commit.StableLogTo > 0) {
       savedLogTo(commit.StableLogTo, commit.StableLogTerm);
@@ -170,7 +191,7 @@ class InMemory {
     return {entries_.begin() + index - markerIndex_, entries_.end()};
   }
 
-  void savedLogTo(uint64_t index, uint64_t term) noexcept
+  void savedLogTo(uint64_t index, uint64_t term)
   {
     if (index < markerIndex_) {
       return;
@@ -185,7 +206,7 @@ class InMemory {
     savedTo_ = index;
   }
 
-  void savedSnapshotTo(uint64_t index) noexcept
+  void savedSnapshotTo(uint64_t index)
   {
     if (snapshot_ && snapshot_->index() == index) {
       snapshot_.reset();
@@ -302,7 +323,7 @@ class InMemory {
 };
 using InMemoryUPtr = std::unique_ptr<InMemory>;
 
-} // namespace raft
+} // namespace logdb
 
 } // namespace ycrt
 

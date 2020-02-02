@@ -53,22 +53,28 @@ Raft::Raft(const Config &config, LogReaderSPtr logdb)
     randomEngine_(chrono::system_clock::now().time_since_epoch().count()),
     handlers_()
 {
-  pair<pbStateSPtr, pbMembershipSPtr> nodeState = logdb->NodeState();
-  for (auto &node : nodeState.second->addresses()) {
+  pbState nodeState = logdb->GetNodeState();
+  pbSnapshotSPtr nodeSnapshot = logdb->GetSnapshot();
+  for (auto &node : nodeSnapshot->membership().addresses()) {
     remotes_.insert({node.first, Remote{}});
     remotes_[node.first].SetNext(1);
   }
-  for (auto &node : nodeState.second->observers()) {
+  for (auto &node : nodeSnapshot->membership().observers()) {
     observers_.insert({node.first, Remote{}});
     observers_[node.first].SetNext(1);
   }
-  for (auto &node : nodeState.second->witnesses()) {
+  for (auto &node : nodeSnapshot->membership().witnesses()) {
     witnesses_.insert({node.first, Remote{}});
     witnesses_[node.first].SetNext(1);
   }
   resetMatchValueArray();
-  if (!(nodeState.first == nullptr)) {
-    loadState(nodeState.first);
+  // FIXME: replace empty
+  pbState empty;
+  empty.set_commit(0);
+  empty.set_vote(0);
+  empty.set_term(0);
+  if (!(nodeState == empty)) {
+    loadState(nodeState);
   }
   if (config.IsObserver) {
     state_ = Observer;
@@ -157,7 +163,7 @@ void Raft::initializeHandlerMap()
   handlers_[Leader][raftpb::ConfigChangeEvent] = &Raft::handleConfigChange;
   handlers_[Leader][raftpb::LocalTick] = &Raft::handleLocalTick;
   handlers_[Leader][raftpb::SnapshotReceived] = &Raft::handleRestoreRemote;
-  handlers_[Leader][raftpb::RateLimit]; // FIXME: RateLimit not implemented
+  //handlers_[Leader][raftpb::RateLimit]; // FIXME: RateLimit not implemented
 
   handlers_[Observer][raftpb::Propose] = &Raft::handleObserverPropose;
   handlers_[Observer][raftpb::Replicate] = &Raft::handleObserverReplicate;
@@ -178,7 +184,7 @@ void Raft::initializeHandlerMap()
   handlers_[Witness][raftpb::SnapshotReceived] = &Raft::handleRestoreRemote;
 }
 
-string Raft::describe() const noexcept
+string Raft::describe() const
 {
   uint64_t lastIndex = logEntry_->LastIndex();
   StatusWith<uint64_t> term = logEntry_->Term(lastIndex);
@@ -200,17 +206,17 @@ pbState Raft::raftState()
   return state;
 }
 
-void Raft::loadState(const pbStateSPtr &state)
+void Raft::loadState(const pbState &state)
 {
-  if (state->commit() < logEntry_->Committed()
-    || state->commit() > logEntry_->LastIndex()) {
+  if (state.commit() < logEntry_->Committed()
+    || state.commit() > logEntry_->LastIndex()) {
     throw Error(ErrorCode::OutOfRange, log,
       "loadState: state out of range, commit={0}, range=[{1},{2}]",
-      state->commit(), logEntry_->Committed(), logEntry_->LastIndex());
+      state.commit(), logEntry_->Committed(), logEntry_->LastIndex());
   }
-  logEntry_->SetCommitted(state->commit());
-  term_ = state->term();
-  vote_ = state->vote();
+  logEntry_->SetCommitted(state.commit());
+  term_ = state.term();
+  vote_ = state.vote();
 }
 
 void Raft::setLeaderID(uint64_t leader)
