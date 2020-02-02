@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <vector>
 #include <memory>
+#include <future>
 #include <mutex>
 #include "utils/Utils.h"
 #include "pb/RaftMessage.h"
@@ -75,10 +76,9 @@ class Context {
   // GetWriteBatch returns a write batch or transaction instance.
   void * GetWriteBatch(); // TODO rocksdb::Batch
   // GetEntryBatch returns an entry batch instance.
-  pbEntryBatch GetEntryBatch();
+  pbEntryBatch GetEntryBatch(); // TODO: pbEntryBatch is just multiple entries, consider std::vector<pbEntry>
   // GetLastEntryBatch returns an entry batch instance.
-  pbEntryBatch GetLastEntryBatch();
-  // TODO: pbEntryBatch is just multiple entries, consider std::vector<pbEntry>
+  pbEntryBatch GetLastEntryBatch(); // TODO: pbEntryBatch is just multiple entries, consider std::vector<pbEntry>
  private:
 };
 
@@ -98,12 +98,53 @@ class LogDB {
   // ListNodeInfo lists all available NodeInfo found in the log DB.
   StatusWith<std::vector<NodeInfo>> ListNodeInfo();
   // SaveBootstrapInfo saves the specified bootstrap info to the log DB.
-  Status SaveBootstrapInfo(uint64_t clusterID, uint64_t nodeID, const pbBootstrap bootstrap);
+  Status SaveBootstrapInfo(
+    uint64_t clusterID,
+    uint64_t nodeID,
+    const pbBootstrap bootstrap);
   // GetBootstrapInfo returns saved bootstrap info from log DB. It returns
   // ErrNoBootstrapInfo when there is no previously saved bootstrap info for
   // the specified node.
   StatusWith<pbBootstrap> GetBootstrapInfo(uint64_t clusterID, uint64_t nodeID);
-  // TODO
+  // SaveRaftState atomically saves the Raft states, log entries and snapshots
+  // metadata found in the pb.Update list to the log DB.
+  Status SaveRaftState(const Span<pbUpdate> updates, const Context &context);
+  // GetRaftState returns the persistented raft state found in Log DB.
+  StatusWith<RaftState> GetRaftState();
+  // GetEntries returns the continuous Raft log entries of the specified
+  // Raft node between the index value range of [low, high) up to a max size
+  // limit of maxSize bytes. It append the located log entries to the argument
+  // entries, returns their total size in bytes or an occurred error.
+  StatusWith<uint64_t> GetEntries(
+    std::vector<pbEntry> &entries,
+    uint64_t size,
+    uint64_t clusterID,
+    uint64_t nodeID,
+    uint64_t low,
+    uint64_t high,
+    uint64_t maxSize);
+  // RemoveEntriesTo removes entries associated with the specified Raft node up
+  // to the specified index.
+  Status RemoveEntriesTo(uint64_t clusterID, uint64_t nodeID, uint64_t index);
+  // CompactEntriesTo reclaims underlying storage space used for storing
+  // entries up to the specified index.
+  StatusWith<std::future<void>> CompactEntriesTo(uint64_t clusterID, uint64_t nodeID, uint64_t index);
+  // SaveSnapshots saves all snapshot metadata found in the pb.Update list.
+  Status SaveSnapshot(const Span<pbUpdate> updates);
+  // DeleteSnapshot removes the specified snapshot metadata from the log DB.
+  Status DeleteSnapshot(uint64_t clusterID, uint64_t nodeID, uint64_t index);
+  // ListSnapshots lists available snapshots associated with the specified
+  // Raft node for index range (0, index].
+  StatusWith<std::vector<pbSnapshotUPtr>> ListSnapshot(
+    uint64_t clusterID,
+    uint64_t nodeID,
+    uint64_t index);
+  // RemoveNodeData removes all data associated with the specified node.
+  Status RemoveNodeData(uint64_t clusterID, uint64_t nodeID);
+  // ImportSnapshot imports the specified snapshot by creating all required
+  // metadata in the logdb.
+  Status ImportSnapshot(uint64_t nodeID, pbSnapshotSPtr snapshot);
+
 };
 using LogDBSPtr = std::shared_ptr<LogDB>;
 
@@ -161,7 +202,7 @@ class LogReader {
   pbState GetNodeState()
   {
     std::unique_lock<std::mutex> guard(mutex_);
-    return state_; // FIXME
+    return state_;
   }
 
   // SetNodeState sets the persistent state known to LogReader.
@@ -273,6 +314,7 @@ class LogReader {
       length_(1)
   {}
 
+  // assume locked
   std::string describe() const
   {
     return fmt::format(
