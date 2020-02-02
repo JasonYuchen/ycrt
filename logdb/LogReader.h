@@ -10,6 +10,7 @@
 #include <memory>
 #include <future>
 #include <mutex>
+#include <settings/Soft.h>
 #include "utils/Utils.h"
 #include "pb/RaftMessage.h"
 
@@ -115,9 +116,9 @@ class LogDB {
   // Raft node between the index value range of [low, high) up to a max size
   // limit of maxSize bytes. It append the located log entries to the argument
   // entries, returns their total size in bytes or an occurred error.
+  // entries should be an empty vector by design
   StatusWith<uint64_t> GetEntries(
     std::vector<pbEntry> &entries,
-    uint64_t size,
     uint64_t clusterID,
     uint64_t nodeID,
     uint64_t low,
@@ -256,9 +257,11 @@ class LogReader {
 
   // GetEntries returns entries between [low, high) with total size of entries
   // limited to maxSize bytes.
+  // entries should be an empty vector by design
   Status GetEntries(std::vector<pbEntry> &entries,
     uint64_t low, uint64_t high, uint64_t maxSize)
   {
+    assert(entries.empty());
     if (low > high) {
       return ErrorCode::OutOfRange;
     }
@@ -362,7 +365,33 @@ class LogReader {
     if (high > lastIndex()+1) {
       return ErrorCode::LogUnavailable;
     }
-    // TODO
+    uint64_t size = 0;
+    StatusWith<uint64_t> _size = logdb_->GetEntries(
+      entries, clusterID_, nodeID_, low, high, maxSize);
+    if (!_size.IsOK()) {
+      return _size.Code();
+    }
+    size = _size.GetOrDefault(0);
+    if (entries.size() == high - low || size > maxSize) { // at least one entry even size > maxSize
+      return ErrorCode::OK;
+    }
+    if (!entries.empty()) {
+      if (entries.front().index() > low) {
+        return ErrorCode::LogCompacted;
+      }
+      uint64_t expected = entries.back().index() + 1;
+      if (lastIndex() <= expected) { // FIXME Is it possible?
+        log->error("{0} found log unavailable, "
+                   "low={1}, high={2}, lastIndex={3}, expected={4}",
+                   describe(), low, high, lastIndex(), expected);
+        return ErrorCode::LogUnavailable;
+      }
+      log->error("{0} found log gap between [{1}:{2}) at {3}",
+                 describe(), low, high, expected); // FIXME Is it a gap?
+      return ErrorCode::LogMismatch;
+    }
+    log->warn("{0} failed to get anything from LogDB", describe());
+    return ErrorCode::LogUnavailable;
   }
 
   slogger log;
