@@ -106,10 +106,12 @@ class InMemory {
     uint64_t low, uint64_t high, uint64_t maxSize) const
   {
     CheckBound(low, high);
-    uint64_t size = 0;
     auto st = entries_.begin() + low - markerIndex_;
     auto ed = entries_.begin() + high - markerIndex_;
-    for (auto it = st; it != ed; ++it) {
+    uint64_t size = settings::EntryNonCmdSize + st->cmd().size();
+    // st + 1 to ensure that GetEntries return at least 1 entry
+    // (even this entry larger than maxSize)
+    for (auto it = st + 1; it != ed; ++it) {
       size += settings::EntryNonCmdSize + it->cmd().size();
       if (size > maxSize) {
         entries.insert(entries.end(), st, it);

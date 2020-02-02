@@ -18,19 +18,91 @@ namespace ycrt
 namespace logdb
 {
 
-// actual persistent log manager (backed up by RocksDB)
-class LogDBContext {
- public:
-  void Destroy();
-  void Reset();
-  // TODO
+struct NodeInfo {
+  uint64_t ClusterID;
+  uint64_t NodeID;
 };
 
+struct RaftState {
+  pbState State;
+  uint64_t FirstIndex;
+  uint64_t EntryCount;
+};
+
+// TODO: actual persistent log manager (backed up by RocksDB)
+// TODO: use Span<char> or shared_ptr<string> or string
+
+// ReusableKey is the interface for keys that can be reused. A reusable key is
+// usually obtained by calling the GetKey() function of the IContext
+// instance.
+class ReusableKey {
+ public:
+  void SetEntryBatchKey(uint64_t clusterID, uint64_t nodeID, uint64_t index);
+  // SetEntryKey sets the key to be an entry key for the specified Raft node
+  // with the specified entry index.
+  void SetEntryKey(uint64_t clusterID, uint64_t nodeID, uint64_t index);
+  // SetStateKey sets the key to be an persistent state key suitable
+  // for the specified Raft cluster node.
+  void SetStateKey(uint64_t clusterID, uint64_t nodeID);
+  // SetMaxIndexKey sets the key to be the max possible index key for the
+  // specified Raft cluster node.
+  void SetMaxIndexKey(uint64_t clusterID, uint64_t nodeID);
+  // Key returns the underlying byte slice of the key.
+  Span<char> Key();
+  // Release releases the key instance so it can be reused in the future.
+  void Release();
+ private:
+};
+
+// Context is the per thread context used in the logdb module.
+// Context is expected to contain a list of reusable keys and byte
+// slices that are owned per thread so they can be safely reused by the same
+// thread when accessing LogDB.
+class Context {
+ public:
+  // Destroy destroys the Context instance.
+  void Destroy();
+  // Reset resets the Context instance, all previous returned keys and
+  // buffers will be put back to the IContext instance and be ready to
+  // be used for the next iteration.
+  void Reset();
+  // GetKey returns a reusable key.
+  ReusableKey GetKey();
+  // GetValueBuffer returns a byte buffer with at least sz bytes in length.
+  Span<char> GetValueBuffer(uint64_t size);
+  // GetUpdates return a raftpb.Update slice,
+  Span<pbUpdate> GetUpdates();
+  // GetWriteBatch returns a write batch or transaction instance.
+  void * GetWriteBatch(); // TODO rocksdb::Batch
+  // GetEntryBatch returns an entry batch instance.
+  pbEntryBatch GetEntryBatch();
+  // GetLastEntryBatch returns an entry batch instance.
+  pbEntryBatch GetLastEntryBatch();
+  // TODO: pbEntryBatch is just multiple entries, consider std::vector<pbEntry>
+ private:
+};
+
+// LogDB is the interface implemented by the log DB for persistently store
+// Raft states, log entries and other Raft metadata.
 class LogDB {
  public:
+  // Name returns the type name of the LogDB instance.
   const std::string &Name() const;
+  // Close closes the LogDB instance.
   void Close();
+  // BinaryFormat returns an constant uint32 value representing the binary
+  // format version compatible with the LogDB instance.
   uint32_t BinaryFormat() const;
+  // GetThreadContext returns a new Context instance.
+  Context GetThreadContext();
+  // ListNodeInfo lists all available NodeInfo found in the log DB.
+  StatusWith<std::vector<NodeInfo>> ListNodeInfo();
+  // SaveBootstrapInfo saves the specified bootstrap info to the log DB.
+  Status SaveBootstrapInfo(uint64_t clusterID, uint64_t nodeID, const pbBootstrap bootstrap);
+  // GetBootstrapInfo returns saved bootstrap info from log DB. It returns
+  // ErrNoBootstrapInfo when there is no previously saved bootstrap info for
+  // the specified node.
+  StatusWith<pbBootstrap> GetBootstrapInfo(uint64_t clusterID, uint64_t nodeID);
   // TODO
 };
 using LogDBSPtr = std::shared_ptr<LogDB>;
@@ -146,6 +218,9 @@ class LogReader {
   Status GetEntries(std::vector<pbEntry> &entries,
     uint64_t low, uint64_t high, uint64_t maxSize)
   {
+    if (low > high) {
+      return ErrorCode::OutOfRange;
+    }
     std::unique_lock<std::mutex> guard(mutex_);
     return getEntries(entries, low, high, maxSize);
   }
@@ -224,7 +299,7 @@ class LogReader {
       return markerTerm_;
     }
     std::vector<pbEntry> entries;
-    Status s = getEntries(entries, index, index + 1, 0);
+    Status s = getEntries(entries, index, index + 1, 0); // maxSize = 0 to ensure only 1 entry
     if (!s.IsOK()) {
       return s;
     }
@@ -239,15 +314,13 @@ class LogReader {
   Status getEntries(std::vector<pbEntry> &entries,
     uint64_t low, uint64_t high, uint64_t maxSize) const
   {
-    if (low > high) {
-      return ErrorCode::OutOfRange;
-    }
     if (low <= markerIndex_) {
       return ErrorCode::LogCompacted;
     }
     if (high > lastIndex()+1) {
       return ErrorCode::LogUnavailable;
     }
+    // TODO
   }
 
   slogger log;
