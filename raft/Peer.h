@@ -17,6 +17,9 @@ namespace ycrt
 namespace raft
 {
 
+// Peer is the interface struct for interacting with the underlying Raft
+// protocol implementation.
+// Peer is the friend class of Raft
 class Peer {
  public:
   struct PeerInfo {
@@ -25,7 +28,7 @@ class Peer {
   };
   static std::unique_ptr<Peer> Launch(
     const Config &config,
-    LogReaderSPtr logdb,
+    logdb::LogReaderSPtr logdb,
     server::RaftEventListenerSPtr listener,
     std::vector<PeerInfo> &peers,
     bool initial,
@@ -46,6 +49,7 @@ class Peer {
     return peer;
   }
 
+  // Tick moves the logical clock forward by one tick.
   void Tick()
   {
     pbMessage m;
@@ -54,6 +58,7 @@ class Peer {
     raft_->Handle(m);
   }
 
+  // QuiescedTick moves the logical clock forward by one tick in quiesced mode.
   void QuiescedTick()
   {
     pbMessage m;
@@ -62,6 +67,8 @@ class Peer {
     raft_->Handle(m);
   }
 
+  // RequestLeaderTransfer makes a request to transfer the leadership to the
+  // specified target node.
   void RequestLeaderTransfer(uint64_t target)
   {
     pbMessage m;
@@ -72,16 +79,21 @@ class Peer {
     raft_->Handle(m);
   }
 
-  void ProposeEntries(std::vector<pbEntry> ents)
+  // ProposeEntries proposes specified entries in a batched mode
+  void ProposeEntries(std::vector<pbEntry> &&ents)
   {
     pbMessage m;
     m.set_type(raftpb::Propose);
     m.set_from(raft_->nodeID_);
     // FIXME: ents
+    for (auto &ent : ents) {
+      m.mutable_entries()->Add(std::move(ent));
+    }
     raft_->Handle(m);
   }
 
-  void ProposeConfigChange(pbConfigChange configChange, uint64_t key)
+  // ProposeConfigChange proposes a raft membership change.
+  void ProposeConfigChange(const pbConfigChange &configChange, uint64_t key)
   {
     std::string config;
     if (!configChange.SerializeToString(&config)) {
@@ -96,20 +108,93 @@ class Peer {
     raft_->Handle(m);
   }
 
-  void ApplyConfigChange(pbConfigChange configChange);
-  void RejectConfigChange();
-  void RestoreRemotes(pbSnapshot snapshot);
-  void ReportUnreachableNode(uint64_t nodeID);
-  void ReportSnapshotStatus(uint64_t nodeID, bool reject);
-  void Handle(pbMessage &m);
-  pbUpdate GetUpdate(bool moreToApply, uint64_t lastApplied);
+  // ApplyConfigChange applies a raft membership change to the local raft node.
+  void ApplyConfigChange(const pbConfigChange &configChange)
+  {
+    if (configChange.node_id() == NoLeader) {
+      raft_->pendingConfigChange_ = false;
+      return;
+    }
+    pbMessage m;
+    m.set_type(raftpb::ConfigChangeEvent);
+    m.set_reject(false);
+    m.set_hint(configChange.node_id());
+    m.set_hint_high(configChange.type());
+    raft_->Handle(m);
+  }
+
+  // RejectConfigChange rejects the currently pending raft membership change.
+  void RejectConfigChange()
+  {
+    pbMessage m;
+    m.set_type(raftpb::ConfigChangeEvent);
+    m.set_reject(true);
+    raft_->Handle(m);
+  }
+
+  // RestoreRemotes applies the remotes info obtained from the specified snapshot.
+  void RestoreRemotes(pbSnapshotUPtr snapshot)
+  {
+    pbMessage m;
+    m.set_type(raftpb::SnapshotReceived);
+    // FIXME
+    m.set_allocated_snapshot(snapshot.release());
+    raft_->Handle(m);
+  }
+
+  // ReportUnreachableNode marks the specified node as not reachable.
+  void ReportUnreachableNode(uint64_t nodeID)
+  {
+    pbMessage m;
+    m.set_type(raftpb::Unreachable);
+    m.set_from(nodeID);
+    raft_->Handle(m);
+  }
+
+  // ReportSnapshotStatus reports the status of the snapshot to the local raft
+  // node.
+  void ReportSnapshotStatus(uint64_t nodeID, bool reject)
+  {
+    pbMessage m;
+    m.set_type(raftpb::SnapshotStatus);
+    m.set_from(nodeID);
+    m.set_reject(reject);
+    raft_->Handle(m);
+  }
+
+  // Handle processes the given message.
+  void Handle(pbMessage &m)
+  {
+    if (Raft::isLocalMessage(m.type())) {
+      throw Error(ErrorCode::UnexpectedRaftMessage, log,
+        "Peer received local message");
+    }
+    auto r = raft_->remotes_.find(m.from()) != raft_->remotes_.end();
+    auto o = raft_->observers_.find(m.from()) != raft_->observers_.end();
+    auto w = raft_->witnesses_.find(m.from()) != raft_->witnesses_.end();
+    if (r || o || w || !Raft::isResponseMessage(m.type())) {
+      raft_->Handle(m);
+    }
+  }
+
+  // GetUpdate returns the current state of the Peer.
+  pbUpdate GetUpdate(bool moreToApply, uint64_t lastApplied)
+  {
+    // FIXME
+    pbUpdate ud = getUpdate(moreToApply, lastApplied);
+    validateUpdate(ud);
+    setFastApply(ud);
+    ud.UpdateCommit = getUpdateCommit(ud);
+    return ud;
+  }
+
   bool HasUpdate(bool moreToApply);
   void Commit(const pbUpdate &update);
   void ReadIndex(pbSystemCtx ctx);
   bool HasEntryToApply();
  private:
   Peer(const Config &config,
-    LogReaderSPtr logdb,
+    logdb::LogReaderSPtr logdb,
     server::RaftEventListenerSPtr listener,
     std::vector<PeerInfo> &peers,
     bool initial,
@@ -128,39 +213,17 @@ class Peer {
       bootstrap(peers);
     }
     if (index.second == 0) {
-      prevState_ = pbState{};
+      prevState_ = pbState{}; // FIXME: Empty pbState
+      prevState_.set_term(0);
+      prevState_.set_vote(0);
+      prevState_.set_commit(0);
     } else {
       prevState_ = raft_->raftState();
     }
-    log->info("Peer {0} launched, initial={1}, newNode={2}", raft_->cn_, initial, newNode);
+    log->info("Peer {0} launched, initial={1}, newNode={2}",
+      raft_->cn_, initial, newNode);
   }
-  pbUpdate getUpdate(bool moreEntriesToApply, uint64_t lastApplied)
-  {
-    auto ud = pbUpdate{};
-    if (moreEntriesToApply) {
-      ud.CommittedEntries = raft_->logEntry_->GetEntriesToApply();
-    }
-    if (!ud.CommittedEntries.empty()) {
-      ud.MoreCommittedEntries = raft_->logEntry_->HasMoreEntriesToApply(
-        ud.CommittedEntries.back().index());
-    }
-    pbState presentState = raft_->raftState();
-    if (presentState != prevState_) {
-      ud.State = presentState;
-    }
-    // FIXME: inmem snapshot
-    if (raft_->logEntry_);
-    if (!raft_->readyToRead_.empty()) {
-      ud.ReadyToReads = raft_->readyToRead_;
-    }
-    if (!raft_->droppedEntries_.empty()) {
-      ud.DroppedEntries = raft_->droppedEntries_;
-    }
-    if (!raft_->droppedReadIndexes_.empty()) {
-      ud.DroppedReadIndexes = raft_->droppedReadIndexes_;
-    }
-    return ud;
-  }
+
   static void checkLaunchRequest(
     const Config &config,
     const std::vector<PeerInfo> &peers,
@@ -188,7 +251,9 @@ class Peer {
     std::string config;
     ents.reserve(peers.size());
     for (auto &peer : peers) {
-      log->info("{0}: inserting a bootstrap ConfigChange AddNode, Node={1}, Address={2}", raft_->describe(), peer.NodeID, peer.Address);
+      log->info("{0}: inserting a bootstrap ConfigChange AddNode, "
+                "Node={1}, Address={2}",
+                raft_->describe(), peer.NodeID, peer.Address);
       pbConfigChange cc;
       cc.set_type(raftpb::AddNode);
       cc.set_node_id(peer.NodeID);
@@ -210,6 +275,40 @@ class Peer {
       raft_->addNode(peer.NodeID);
     }
   }
+
+  pbUpdate getUpdate(bool moreEntriesToApply, uint64_t lastApplied)
+  {
+    auto ud = pbUpdate{};
+    if (moreEntriesToApply) {
+      ud.CommittedEntries = raft_->logEntry_->GetEntriesToApply();
+    }
+    if (!ud.CommittedEntries.empty()) {
+      ud.MoreCommittedEntries = raft_->logEntry_->HasMoreEntriesToApply(
+        ud.CommittedEntries.back().index());
+    }
+    pbState presentState = raft_->raftState();
+    if (presentState != prevState_) {
+      ud.State = presentState;
+    }
+    // FIXME: inmem snapshot
+    if (raft_->logEntry_);
+    if (!raft_->readyToRead_.empty()) {
+      ud.ReadyToReads = raft_->readyToRead_;
+    }
+    if (!raft_->droppedEntries_.empty()) {
+      ud.DroppedEntries = raft_->droppedEntries_;
+    }
+    if (!raft_->droppedReadIndexes_.empty()) {
+      ud.DroppedReadIndexes = raft_->droppedReadIndexes_;
+    }
+    return ud;
+  }
+
+  void setFastApply(pbUpdate &ud) {
+    ud.FastApply = true;
+    // FIXME
+  }
+
   slogger log;
   RaftUPtr raft_;
   pbState prevState_;

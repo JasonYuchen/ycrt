@@ -43,7 +43,7 @@ class Raft {
     bool IsLeader() { return NodeState == Leader; }
     bool IsFollower() { return NodeState == Follower; }
   };
-  Raft(const Config &config, LogReaderSPtr logdb);
+  Raft(const Config &config, logdb::LogReaderSPtr logdb);
   Status GetLocalStatus();
   void Handle(pbMessage &&m);
   void Handle(pbMessage &m);
@@ -152,8 +152,6 @@ class Raft {
   void handleHeartbeat(pbMessage &m);
   void handleInstallSnapshot(pbMessage &m);
   void handleReplicate(pbMessage &m);
-  bool isRequestMessage(pbMessageType type);
-  bool isLeaderMessage(pbMessageType type);
   bool dropRequestVoteFromHighTermNode(pbMessage &m);
   bool onMessageTermNotMatched(pbMessage &m);
   void handleElection(pbMessage &m);
@@ -205,6 +203,13 @@ class Raft {
   void handleCandidateReadIndex(pbMessage &m);
   void handleCandidateInstallSnapshot(pbMessage &m);
   void handleCandidateRequestVoteResp(pbMessage &m);
+
+  // utils
+  // TODO: move to the pbMessage class
+  static bool isRequestMessage(pbMessageType type);
+  static bool isLeaderMessage(pbMessageType type);
+  static bool isLocalMessage(pbMessageType type);
+  static bool isResponseMessage(pbMessageType type);
 
   slogger log;
   uint64_t clusterID_;

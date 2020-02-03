@@ -1208,23 +1208,6 @@ void Raft::handleReplicate(pbMessage &m)
   send(std::move(resp));
 }
 
-bool Raft::isRequestMessage(pbMessageType type)
-{
-  return
-    type == raftpb::Propose ||
-    type == raftpb::ReadIndex;
-}
-
-bool Raft::isLeaderMessage(pbMessageType type)
-{
-  return
-    type == raftpb::Replicate ||
-    type == raftpb::InstallSnapshot ||
-    type == raftpb::Heartbeat ||
-    type == raftpb::TimeoutNow ||
-    type == raftpb::ReadIndexResp;
-}
-
 // by dropping the RequestVote from high term node
 // when we do not exceed the minimum election timeout
 // we can minimize the interruption by network partition problem
@@ -1779,6 +1762,47 @@ void Raft::handleCandidateRequestVoteResp(pbMessage &m)
     // etcd raft does this, it is not stated in the raft paper
     becomeFollower(term_, NoLeader);
   }
+}
+
+bool Raft::isRequestMessage(pbMessageType type)
+{
+  return
+    type == raftpb::Propose ||
+    type == raftpb::ReadIndex;
+}
+
+bool Raft::isLeaderMessage(pbMessageType type)
+{
+  return
+    type == raftpb::Replicate ||
+    type == raftpb::InstallSnapshot ||
+    type == raftpb::Heartbeat ||
+    type == raftpb::TimeoutNow ||
+    type == raftpb::ReadIndexResp;
+}
+
+bool Raft::isLocalMessage(pbMessageType type)
+{
+  return
+    type == raftpb::Election ||
+    type == raftpb::LeaderHeartbeat ||
+    type == raftpb::Unreachable ||
+    type == raftpb::SnapshotStatus ||
+    type == raftpb::CheckQuorum ||
+    type == raftpb::LocalTick ||
+    type == raftpb::BatchedReadIndex;
+}
+
+bool Raft::isResponseMessage(pbMessageType type)
+{
+  return
+    type == raftpb::ReplicateResp ||
+    type == raftpb::RequestVoteResp ||
+    type == raftpb::HeartbeatResp ||
+    type == raftpb::ReadIndexResp ||
+    type == raftpb::Unreachable ||
+    type == raftpb::SnapshotStatus ||
+    type == raftpb::LeaderTransfer;
 }
 
 } // namespace raft

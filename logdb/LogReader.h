@@ -87,6 +87,7 @@ class Context {
 // Raft states, log entries and other Raft metadata.
 class LogDB {
  public:
+  static std::unique_ptr<LogDB> New();
   // Name returns the type name of the LogDB instance.
   const std::string &Name() const;
   // Close closes the LogDB instance.
