@@ -41,7 +41,11 @@ Transport::Transport(
   RaftMessageHandler &handlers,
   function<string(uint64_t, uint64_t)> &&snapshotDirFunc,
   uint64_t ioContexts)
-  : log(Log.GetLogger("transport")),
+  : streamConnections_(Soft::ins().StreamConnections),
+    sendQueueLength_(Soft::ins().SendQueueLength),
+    getConnectedTimeoutS_(Soft::ins().GetConnectedTimeoutS),
+    idleTimeoutS_(60), // TODO: add idleTimeoutS to soft?, add idleTimeoutS_ to Asio to handle timeout events
+    log(Log.GetLogger("transport")),
     io_(1),
     worker_(io_),
     main_([this](){ io_.run(); }),
@@ -49,10 +53,6 @@ Transport::Transport(
     ioctxIdx_(0),
     ioctxs_(),
     acceptor_(io_, getEndpoint(string_view(nhConfig.ListenAddress))),
-//    streamConnections_(Soft::ins().StreamConnections),
-//    sendQueueLength_(Soft::ins().SendQueueLength),
-//    getConnectedTimeoutS_(Soft::ins().GetConnectedTimeoutS),
-//    idleTimeoutS_(60), // TODO: add idleTimeoutS to soft?, add idleTimeoutS_ to Asio to handle timeout events
     deploymentID_(nhConfig.DeploymentID),
     mutex_(),
     sendChannels_(),
@@ -85,7 +85,7 @@ bool Transport::AsyncSendMessage(pbMessageUPtr m)
     auto it = sendChannels_.find(node->Key);
     if (it == sendChannels_.end()) {
       ch = make_shared<SendChannel>(
-        this, nextIOContext(), sourceAddress_, node, sendQueueLength_);
+        this, nextIOContext(), sourceAddress_, node, Soft::ins().SendQueueLength);
       sendChannels_[node->Key] = ch;
       ch->Start();
     } else {
@@ -119,8 +119,6 @@ void Transport::Start()
     [conn, this](const error_code &ec) mutable {
       if (!ec) {
         log->info("new connection received from {0}", conn->socket().remote_endpoint().address().to_string());
-        conn->SetRequestHandler(bind(&Transport::handleRequest, this, std::placeholders::_1));
-        conn->SetChunkHandler(bind(&Transport::handleSnapshotChunk, this, std::placeholders::_1));
         conn->Start();
       } else if (ec.value() == error::operation_aborted) {
         return;
@@ -162,7 +160,7 @@ io_context &Transport::nextIOContext()
   return ioctxs_[ioctxIdx_.fetch_add(1) % ioctxs_.size()]->io;
 }
 
-void Transport::handleRequest(pbMessageBatchUPtr m)
+void Transport::HandleRequest(pbMessageBatchUPtr m)
 {
   if (m->deployment_id() != deploymentID_) {
     log->warn(
@@ -188,12 +186,12 @@ void Transport::handleRequest(pbMessageBatchUPtr m)
   // TODO: metrics
 }
 
-void Transport::handleSnapshotChunk(pbSnapshotChunkSPtr m)
+void Transport::HandleSnapshotChunk(pbSnapshotChunkSPtr m)
 {
   // FIXME
 }
 
-void Transport::handleSnapshotConfirm(
+void Transport::HandleSnapshotConfirm(
   uint64_t clusterID,
   uint64_t nodeID,
   uint64_t from)
@@ -201,7 +199,7 @@ void Transport::handleSnapshotConfirm(
   handlers_.handleSnapshot(clusterID, nodeID, from);
 }
 
-void Transport::handleUnreachable(const std::string &address)
+void Transport::HandleUnreachable(const std::string &address)
 {
   vector<NodeInfo> remotes = resolver_.ReverseResolve(address);
   log->info("node {0} becomes unreachable, affecting {1} raft nodes",

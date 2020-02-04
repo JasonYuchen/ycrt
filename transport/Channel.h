@@ -53,7 +53,7 @@ class Transport;
 class SendChannel : public std::enable_shared_from_this<SendChannel> {
  public:
   explicit SendChannel(
-    Transport *tranport,
+    Transport &tranport,
     boost::asio::io_context &io,
     std::string source,
     NodesRecordSPtr nodeRecord,
@@ -69,7 +69,7 @@ class SendChannel : public std::enable_shared_from_this<SendChannel> {
   void checkIdle();
   void stop();
   slogger log;
-  Transport *transport_;
+  Transport &transport_;
   std::atomic_bool isConnected_;
   std::atomic_bool inQueue_;
   std::string sourceAddress_;
@@ -85,21 +85,11 @@ class SendChannel : public std::enable_shared_from_this<SendChannel> {
 };
 using SendChannelSPtr = std::shared_ptr<SendChannel>;
 
-using RequestHandler = std::function<void(pbMessageBatchUPtr)>;
-using ChunkHandler = std::function<void(pbSnapshotChunkUPtr)>;
 // owned by Transport
 class RecvChannel : public std::enable_shared_from_this<RecvChannel> {
  public:
-  explicit RecvChannel(Transport *tranport, boost::asio::io_context &io);
+  explicit RecvChannel(Transport &tranport, boost::asio::io_context &io);
   boost::asio::ip::tcp::socket &socket() {return socket_;}
-  void SetRequestHandler(RequestHandler &&handler)
-  {
-    requestHandler_ = std::move(handler);
-  }
-  void SetChunkHandler(ChunkHandler &&handler)
-  {
-    chunkHandler_ = std::move(handler);
-  }
   void Start();
   ~RecvChannel();
  private:
@@ -109,26 +99,24 @@ class RecvChannel : public std::enable_shared_from_this<RecvChannel> {
   void checkIdle();
   void stop();
   slogger log;
-  Transport *transport_;
+  Transport &transport_;
   boost::asio::ip::tcp::socket socket_;
   boost::asio::steady_timer idleTimer_;
   bool stopped_;
   RequestHeader header_;
   char headerBuf_[RequestHeaderSize];
   std::vector<char> payloadBuf_;
-  RequestHandler requestHandler_;
-  ChunkHandler chunkHandler_;
 };
 using RecvChannelSPtr = std::shared_ptr<RecvChannel>;
 
 class SnapshotLane : public std::enable_shared_from_this<SnapshotLane> {
  public:
   explicit SnapshotLane(
-    Transport *transport,
+    Transport &transport,
     boost::asio::io_context &io);
  private:
   slogger log;
-  Transport *transport_;
+  Transport &transport_;
   std::atomic_bool isConnected_;
   std::atomic_bool inQueue_;
   std::string sourceAddress_;

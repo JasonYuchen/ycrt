@@ -52,6 +52,16 @@ class Transport {
   void Start();
   void Stop();
   void RemoveSendChannel(const std::string &key);
+
+  // receive a normal message, called by RecvChannel
+  void HandleRequest(pbMessageBatchUPtr m);
+  // receive a snapshot chunk, called by RecvChannel
+  void HandleSnapshotChunk(pbSnapshotChunkSPtr m);
+  // receive the last piece of snapshot and notify the corresponding cluster, called by
+  void HandleSnapshotConfirm(uint64_t clusterID, uint64_t nodeID, uint64_t from);
+  // remote node is unreachable, notify the corresponding cluster, called by
+  void HandleUnreachable(const std::string &address);
+
   ~Transport();
  private:
   explicit Transport(
@@ -61,14 +71,11 @@ class Transport {
     std::function<std::string(uint64_t, uint64_t)> &&snapshotDirFunc,
     uint64_t ioContexts);
   boost::asio::io_context &nextIOContext();
-  // receive a normal message
-  void handleRequest(pbMessageBatchUPtr m);
-  // receive a snapshot chunk
-  void handleSnapshotChunk(pbSnapshotChunkSPtr m);
-  // receive the last piece of snapshot and notify the corresponding cluster
-  void handleSnapshotConfirm(uint64_t clusterID, uint64_t nodeID, uint64_t from);
-  // remote node is unreachable, notify the corresponding cluster
-  void handleUnreachable(const std::string &address);
+
+  const uint64_t streamConnections_;
+  const uint64_t sendQueueLength_;
+  const uint64_t getConnectedTimeoutS_;
+  const uint64_t idleTimeoutS_;
 
   slogger log;
   boost::asio::io_context io_;
@@ -85,10 +92,6 @@ class Transport {
   std::atomic_uint64_t ioctxIdx_;
   std::vector<std::unique_ptr<ioctx>> ioctxs_;
   boost::asio::ip::tcp::acceptor acceptor_;
-//  uint64_t streamConnections_;
-//  uint64_t sendQueueLength_;
-//  uint64_t getConnectedTimeoutS_;
-//  uint64_t idleTimeoutS_;
   uint64_t deploymentID_;
 
   std::mutex mutex_;

@@ -24,7 +24,7 @@ constexpr seconds ReadHeaderDuration(1);
 constexpr seconds ReadPayloadDuration(1);
 
 SendChannel::SendChannel(
-  Transport *tranport,
+  Transport &tranport,
   io_context &io,
   string source,
   NodesRecordSPtr nodeRecord,
@@ -88,7 +88,7 @@ void SendChannel::asyncSendMessage()
       bool inProgress = !outputQueue_.empty();
       auto batch = make_unique<raftpb::MessageBatch>();
       batch->set_source_address(sourceAddress_);
-      batch->set_deployment_id(transport_->GetDeploymentID());
+      batch->set_deployment_id(transport_.GetDeploymentID());
       // TODO: MessageBatch rpc bin ver
       for (size_t i = 0; i < count; ++i) {
         // TODO: use customized serialization, not thread-safe to use move here !!!
@@ -142,7 +142,7 @@ void SendChannel::sendMessage()
         // FIXME: do log, nodeInfo_->key ?
         log->warn("SendChannel to {0} closed due to async_write error {1}",
           nodeRecord_->Address, ec.message());
-        transport_->RemoveSendChannel(nodeRecord_->Key);
+        transport_.RemoveSendChannel(nodeRecord_->Key);
         stop();
       }
     });
@@ -162,7 +162,7 @@ void SendChannel::resolve()
       } else {
         log->warn("SendChannel to {0} closed due to async_resolve error {1}",
           nodeRecord_->Address, ec.message());
-        transport_->RemoveSendChannel(nodeRecord_->Key);
+        transport_.RemoveSendChannel(nodeRecord_->Key);
         stop();
       }
     });
@@ -187,7 +187,7 @@ void SendChannel::connect(tcp::resolver::results_type endpointIter)
       } else {
         log->warn("SendChannel to {0} closed due to async_connect error {1}",
           nodeRecord_->Address, ec.message());
-        transport_->RemoveSendChannel(nodeRecord_->Key);
+        transport_.RemoveSendChannel(nodeRecord_->Key);
         stop();
       }
     });
@@ -221,7 +221,7 @@ void SendChannel::stop()
   }
 }
 
-RecvChannel::RecvChannel(Transport *tranport, io_context &io)
+RecvChannel::RecvChannel(Transport &tranport, io_context &io)
   : log(Log.GetLogger("transport")),
     transport_(tranport),
     socket_(io),
@@ -286,7 +286,7 @@ void RecvChannel::readPayload()
             stop();
             return;
           }
-          requestHandler_(std::move(msg));
+          transport_.HandleRequest(std::move(msg));
         } else if (header_.Method == SnapshotChunkType) {
           auto msg = make_unique<raftpb::SnapshotChunk>();
           auto done = msg->ParseFromArray(payloadBuf_.data(), header_.Size);
@@ -296,7 +296,7 @@ void RecvChannel::readPayload()
             stop();
             return;
           }
-          chunkHandler_(std::move(msg));
+          transport_.HandleSnapshotChunk(std::move(msg));
         } else {
           // should not reach here
           log->error("RecvChannel closed due to invalid method type");
