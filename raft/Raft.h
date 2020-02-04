@@ -94,15 +94,15 @@ class Raft {
   void finalizeMessageTerm(pbMessage &m);
   void sendReplicateMessage(uint64_t to);
   void broadcastReplicateMessage();
-  void sendHeartbeatMessage(uint64_t to ,pbSystemCtx hint, uint64_t match);
+  void sendHeartbeatMessage(uint64_t to ,pbReadIndexCtx hint, uint64_t match);
   void broadcastHeartbeatMessage();
-  void broadcastHeartbeatMessage(pbSystemCtx hint);
+  void broadcastHeartbeatMessage(pbReadIndexCtx hint);
   void sendTimeoutNowMessage(uint64_t to);
 
   // message generation
   pbMessageUPtr makeInstallSnapshotMessage(uint64_t to);
   pbMessageUPtr makeReplicateMessage(uint64_t to, uint64_t next, uint64_t maxSize);
-  std::vector<pbEntry> makeMetadataEntries(const std::vector<pbEntry> &entries);
+  EntryVector makeMetadataEntries(const EntryVector &entries);
   void finalizeWitnessSnapshot(pbSnapshot &s);
 
   // message dropped
@@ -113,7 +113,7 @@ class Raft {
   // log append and commit
   void sortMatchValues();
   bool tryCommit();
-  void appendEntries(Span<pbEntry> entries);
+  void appendEntries(Span<pbEntrySPtr> entries);
 
   // state transition
   void reset(uint64_t term);
@@ -227,13 +227,13 @@ class Raft {
   std::unordered_map<uint64_t, Remote> remotes_;
   std::unordered_map<uint64_t, Remote> observers_;
   std::unordered_map<uint64_t, Remote> witnesses_;
-  std::vector<pbMessageUPtr> messages_;
+  MessageVectorSPtr messages_;
   std::vector<uint64_t> matched_;
   LogEntryUPtr logEntry_;
   ReadIndex readIndex_;
-  std::vector<pbReadyToRead> readyToRead_;
-  std::vector<pbEntry> droppedEntries_;
-  std::vector<pbSystemCtx> droppedReadIndexes_;
+  ReadyToReadVectorSPtr readyToRead_;
+  EntryVectorSPtr droppedEntries_;
+  ReadIndexCtxVectorSPtr droppedReadIndexes_;
   bool quiesce_;
   bool checkQuorum_;
   uint64_t tickCount_;

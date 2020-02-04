@@ -12,7 +12,6 @@
 #include "logdb/InMemory.h"
 #include "logdb/LogReader.h"
 #include "utils/Utils.h"
-#include "LogEntryUtils.h"
 
 namespace ycrt
 {
@@ -146,17 +145,17 @@ class LogEntry {
     return ErrorCode::OK;
   }
 
-  std::vector<pbEntry> GetUncommittedEntries() const
+  std::vector<pbEntrySPtr> GetUncommittedEntries() const
   {
     // committed entries must have been persisted in logDB
-    std::vector<pbEntry> entries;
+    std::vector<pbEntrySPtr> entries;
     uint64_t low = std::max(committed_ + 1, inMem_.GetMarkerIndex());
     uint64_t high = inMem_.GetEntriesSize() + inMem_.GetMarkerIndex();
     inMem_.GetEntries(entries, low, high);
     return entries;
   }
 
-  StatusWith<std::vector<pbEntry>> GetEntriesWithBound(
+  StatusWith<EntryVector> GetEntriesWithBound(
     uint64_t low, uint64_t high, uint64_t maxSize) const
   {
     Status s = CheckBound(low, high);
@@ -164,10 +163,10 @@ class LogEntry {
       return s;
     }
     if (low == high) {
-      return std::vector<pbEntry>{};
+      return EntryVector{};
     }
     uint64_t inMemoryMarker = inMem_.GetMarkerIndex();
-    std::vector<pbEntry> entries;
+    EntryVector entries;
     if (low >= inMemoryMarker) {
       // retrieve from inMem
       appendEntriesFromInMem(entries, low, high, maxSize);
@@ -185,7 +184,7 @@ class LogEntry {
       } else {
         uint64_t sizedb = 0;
         for (auto &ent : entries) {
-          sizedb += settings::EntryNonCmdSize + ent.cmd().size();
+          sizedb += settings::EntryNonCmdSize + ent->cmd().size();
         }
         appendEntriesFromInMem(entries, inMemoryMarker, high, maxSize - sizedb);
       }
@@ -193,7 +192,7 @@ class LogEntry {
     return entries;
   }
 
-  StatusWith<std::vector<pbEntry>> GetEntriesFromStart(
+  StatusWith<EntryVector> GetEntriesFromStart(
     uint64_t start, uint64_t maxSize) const
   {
     if (start > LastIndex()) {
@@ -202,7 +201,7 @@ class LogEntry {
     return GetEntriesWithBound(start, LastIndex() + 1, maxSize);
   }
 
-  std::vector<pbEntry> GetEntriesToApply(
+  EntryVector GetEntriesToApply(
     uint64_t limit = settings::Soft::ins().MaxEntrySize) const
   {
     if (HasEntriesToApply()) {
@@ -212,7 +211,7 @@ class LogEntry {
     return {};
   }
 
-  std::vector<pbEntry> GetEntriesToSave() const
+  EntryVector GetEntriesToSave() const
   {
     return inMem_.GetEntriesToSave();
   }
@@ -225,6 +224,11 @@ class LogEntry {
     return logDB_->GetSnapshot();
   }
 
+  pbSnapshotSPtr GetInMemorySnapshot() const
+  {
+    return inMem_.GetSnapshot();
+  }
+
   bool HasEntriesToApply() const
   {
     return toApplyIndexLimit() > firstNotAppliedIndex();
@@ -235,7 +239,7 @@ class LogEntry {
     return committed_ > appliedTo;
   }
 
-  bool TryAppend(uint64_t index, const Span<pbEntry> entries)
+  bool TryAppend(uint64_t index, const Span<pbEntrySPtr> entries)
   {
     uint64_t conflictIndex = getConflictIndex(entries);
     if (conflictIndex != 0) {
@@ -251,15 +255,15 @@ class LogEntry {
     return false;
   }
 
-  void Append(const Span<pbEntry> entries)
+  void Append(const Span<pbEntrySPtr> entries)
   {
     if (entries.empty()) {
       return;
     }
-    if (entries[0].index() <= committed_) {
+    if (entries[0]->index() <= committed_) {
       throw Error(ErrorCode::LogMismatch, log,
         "append conflicts with committed entries, "
-        "first={0}, committed={1}", entries[0].index(), committed_);
+        "first={0}, committed={1}", entries[0]->index(), committed_);
     }
     inMem_.Merge(entries);
   }
@@ -370,23 +374,23 @@ class LogEntry {
     return committed_ + 1;
   }
 
-  uint64_t getConflictIndex(const Span<pbEntry> entries) const
+  uint64_t getConflictIndex(const Span<pbEntrySPtr> entries) const
   {
     for (const auto &ent : entries) {
-      if (!MatchTerm(ent.index(), ent.term())) {
-        return ent.index();
+      if (!MatchTerm(ent->index(), ent->term())) {
+        return ent->index();
       }
     }
     return 0;
   }
 
-  Status appendEntriesFromLogDB(std::vector<pbEntry> &entries,
+  Status appendEntriesFromLogDB(EntryVector &entries,
     uint64_t low, uint64_t high, uint64_t maxSize) const
   {
     return logDB_->GetEntries(entries, low, high, maxSize);
   }
 
-  Status appendEntriesFromInMem(std::vector<pbEntry> &entries,
+  Status appendEntriesFromInMem(EntryVector &entries,
     uint64_t low, uint64_t high, uint64_t maxSize) const
   {
     inMem_.GetEntries(entries, low, high, maxSize);

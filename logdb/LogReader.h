@@ -119,12 +119,12 @@ class LogDB {
   // entries, returns their total size in bytes or an occurred error.
   // entries should be an empty vector by design
   StatusWith<uint64_t> GetEntries(
-    std::vector<pbEntry> &entries,
+    EntryVector &entries,
     uint64_t clusterID,
     uint64_t nodeID,
     uint64_t low,
     uint64_t high,
-    uint64_t maxSize);
+    uint64_t maxSize){};
   // RemoveEntriesTo removes entries associated with the specified Raft node up
   // to the specified index.
   Status RemoveEntriesTo(uint64_t clusterID, uint64_t nodeID, uint64_t index);
@@ -259,7 +259,7 @@ class LogReader {
   // GetEntries returns entries between [low, high) with total size of entries
   // limited to maxSize bytes.
   // entries should be an empty vector by design
-  Status GetEntries(std::vector<pbEntry> &entries,
+  Status GetEntries(EntryVector &entries,
     uint64_t low, uint64_t high, uint64_t maxSize)
   {
     assert(entries.empty());
@@ -344,7 +344,7 @@ class LogReader {
     if (index == markerIndex_) {
       return markerTerm_;
     }
-    std::vector<pbEntry> entries;
+    EntryVector entries;
     Status s = getEntries(entries, index, index + 1, 0); // maxSize = 0 to ensure only 1 entry
     if (!s.IsOK()) {
       return s;
@@ -352,12 +352,12 @@ class LogReader {
     if (entries.empty()) {
       return 0;
     } else {
-      return entries[0].term();
+      return entries[0]->term();
     }
   }
 
   // assume locked
-  Status getEntries(std::vector<pbEntry> &entries,
+  Status getEntries(EntryVector &entries,
     uint64_t low, uint64_t high, uint64_t maxSize) const
   {
     if (low <= markerIndex_) {
@@ -377,10 +377,10 @@ class LogReader {
       return ErrorCode::OK;
     }
     if (!entries.empty()) {
-      if (entries.front().index() > low) {
+      if (entries.front()->index() > low) {
         return ErrorCode::LogCompacted;
       }
-      uint64_t expected = entries.back().index() + 1;
+      uint64_t expected = entries.back()->index() + 1;
       if (lastIndex() <= expected) { // FIXME Is it possible?
         log->error("{0} found log unavailable, "
                    "low={1}, high={2}, lastIndex={3}, expected={4}",

@@ -29,16 +29,16 @@ SendChannel::SendChannel(
   string source,
   NodesRecordSPtr nodeRecord,
   uint64_t queueLen)
-  : transport_(tranport),
-    log(Log.GetLogger("transport")),
+  : log(Log.GetLogger("transport")),
+    transport_(tranport),
     isConnected_(false),
     inQueue_(false),
     sourceAddress_(std::move(source)),
     io_(io),
     socket_(io),
+    resolver_(io),
     idleTimer_(io),
     stopped_(false),
-    resolver_(io),
     nodeRecord_(std::move(nodeRecord)),
     bufferQueue_(make_shared<BlockingConcurrentQueue<pbMessageUPtr>>(queueLen))
 {
@@ -59,10 +59,12 @@ bool SendChannel::AsyncSendMessage(pbMessageUPtr m)
   if (!done) {
     // message dropped due to queue length
     log->warn("message dropped due to queue size");
+    return false;
   } else if (isConnected_ && !inQueue_.exchange(true)) {
     // inQueue to prevent too many pending posted callbacks
     asyncSendMessage();
   }
+  return true;
 }
 
 SendChannel::~SendChannel()
@@ -220,8 +222,8 @@ void SendChannel::stop()
 }
 
 RecvChannel::RecvChannel(Transport *tranport, io_context &io)
-  : transport_(tranport),
-    log(Log.GetLogger("transport")),
+  : log(Log.GetLogger("transport")),
+    transport_(tranport),
     socket_(io),
     idleTimer_(io),
     stopped_(false),

@@ -29,6 +29,7 @@ enum class ErrorCode : uint32_t {
   UnexpectedRaftState,
   UnexpectedRaftMessage,
   InvalidReadIndex,
+  InvalidUpdate,
   Other,
 };
 

@@ -73,28 +73,28 @@ class Span {
   {
     return len_ == 0;
   }
-  T &back() noexcept
+  T &back()
   {
     if (empty()) {
       throw Error(ErrorCode::OutOfRange);
     }
     return start_[len_-1];
   }
-  const T &back() const noexcept
+  const T &back() const
   {
     if (empty()) {
       throw Error(ErrorCode::OutOfRange);
     }
     return start_[len_-1];
   }
-  T &front() noexcept
+  T &front()
   {
     if (empty()) {
       throw Error(ErrorCode::OutOfRange);
     }
     return start_[0];
   }
-  const T &front() const noexcept
+  const T &front() const
   {
     if (empty()) {
       throw Error(ErrorCode::OutOfRange);
@@ -147,8 +147,8 @@ class Span {
 
 class Stopper {
  public:
-  explicit Stopper(const std::string &name = "unknown")
-    : name_(name), stopped_(false), workers_() {}
+  explicit Stopper(std::string name = "unknown")
+    : name_(std::move(name)), stopped_(false), workers_() {}
   // not thread safe
   void RunWorker(std::function<void(std::atomic_bool&)> &&main)
   {

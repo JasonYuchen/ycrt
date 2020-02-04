@@ -9,7 +9,6 @@
 #include "pb/RaftMessage.h"
 #include "utils/Utils.h"
 #include "settings/Soft.h"
-#include "raft/LogEntryUtils.h"
 
 namespace ycrt
 {
@@ -30,21 +29,21 @@ namespace logdb
 
 // for checking log entry continuity
 inline void CheckEntriesToAppend(
-  const Span<pbEntry> existing,
-  const Span<pbEntry> append)
+  const Span<pbEntrySPtr> existing,
+  const Span<pbEntrySPtr> append)
 {
   if (existing.empty() || append.empty()) {
     return;
   }
-  if (existing.back().index() + 1 != append.front().index()) {
+  if (existing.back()->index() + 1 != append.front()->index()) {
     throw Error(ErrorCode::LogMismatch,
       "found a hold, exist {0}, append {1}",
-      existing.back().index(), append.front().index());
+      existing.back()->index(), append.front()->index());
   }
-  if (existing.back().term() > append.front().term()) {
+  if (existing.back()->term() > append.front()->term()) {
     throw Error(ErrorCode::LogMismatch,
       "unexpected term, ecist {0}, append {1}",
-      existing.back().term(), append.front().term());
+      existing.back()->term(), append.front()->term());
   }
 }
 
@@ -71,9 +70,9 @@ class InMemory {
   void CheckMarkerIndex() const
   {
     if (!entries_.empty()) {
-      if (entries_[0].index() != markerIndex_) {
+      if (entries_[0]->index() != markerIndex_) {
         throw Error(ErrorCode::OutOfRange,
-          "InMemory: marker={0}, first={1}", markerIndex_, entries_[0].index());
+          "InMemory: marker={0}, first={1}", markerIndex_, entries_[0]->index());
       }
     }
   }
@@ -93,7 +92,7 @@ class InMemory {
     return entries_.size();
   }
 
-  void GetEntries(std::vector<pbEntry> &entries,
+  void GetEntries(EntryVector &entries,
     uint64_t low, uint64_t high) const
   {
     CheckBound(low, high);
@@ -102,17 +101,17 @@ class InMemory {
     entries.insert(entries.end(), st, ed);
   }
 
-  void GetEntries(std::vector<pbEntry> &entries,
+  void GetEntries(EntryVector &entries,
     uint64_t low, uint64_t high, uint64_t maxSize) const
   {
     CheckBound(low, high);
     auto st = entries_.begin() + low - markerIndex_;
     auto ed = entries_.begin() + high - markerIndex_;
-    uint64_t size = settings::EntryNonCmdSize + st->cmd().size();
+    uint64_t size = settings::EntryNonCmdSize + (*st)->cmd().size();
     // st + 1 to ensure that GetEntries return at least 1 entry
     // (even this entry larger than maxSize)
     for (auto it = st + 1; it != ed; ++it) {
-      size += settings::EntryNonCmdSize + it->cmd().size();
+      size += settings::EntryNonCmdSize + (*it)->cmd().size();
       if (size > maxSize) {
         entries.insert(entries.end(), st, it);
         return;
@@ -143,7 +142,7 @@ class InMemory {
   StatusWith<uint64_t> GetLastIndex() const
   {
     if (!entries_.empty()) {
-      return entries_.back().index();
+      return entries_.back()->index();
     } else {
       return GetSnapshotIndex();
     }
@@ -155,7 +154,9 @@ class InMemory {
       if (appliedToTerm_ != 0) {
         return appliedToTerm_;
       } else {
-        throw Error(ErrorCode::OutOfRange, "InMemory: appliedToIndex={0}, appliedToTerm={1}", appliedToIndex_, appliedToTerm_);
+        throw Error(ErrorCode::OutOfRange,
+          "InMemory: appliedToIndex={0}, appliedToTerm={1}",
+          appliedToIndex_, appliedToTerm_);
       }
     }
 
@@ -167,8 +168,8 @@ class InMemory {
       }
     }
 
-    if (!entries_.empty() && entries_.back().index() >= index) {
-      return entries_[index - markerIndex_].term();
+    if (!entries_.empty() && entries_.back()->index() >= index) {
+      return entries_[index - markerIndex_]->term();
     } else {
       return ErrorCode::OutOfRange;
     }
@@ -176,15 +177,15 @@ class InMemory {
 
   void CommitUpdate(const pbUpdateCommit &commit)
   {
-    if (commit.StableLogTo > 0) {
-      savedLogTo(commit.StableLogTo, commit.StableLogTerm);
+    if (commit.StableLogIndex > 0) {
+      savedLogTo(commit.StableLogIndex, commit.StableLogTerm);
     }
-    if (commit.StableSnapshotTo > 0) {
-      savedSnapshotTo(commit.StableSnapshotTo);
+    if (commit.StableSnapshotIndex > 0) {
+      savedSnapshotTo(commit.StableSnapshotIndex);
     }
   }
 
-  std::vector<pbEntry> GetEntriesToSave() const
+  EntryVector GetEntriesToSave() const
   {
     uint64_t index = savedTo_ + 1;
     if (index - markerIndex_ > entries_.size()) {
@@ -201,8 +202,8 @@ class InMemory {
     if (entries_.empty()) {
       return;
     }
-    if (index > entries_.back().index() ||
-      term != entries_[index - markerIndex_].term()) {
+    if (index > entries_.back()->index() ||
+      term != entries_[index - markerIndex_]->term()) {
       return;
     }
     savedTo_ = index;
@@ -225,10 +226,10 @@ class InMemory {
     if (entries_.empty()) {
       return;
     }
-    if (index > entries_.back().index()) {
+    if (index > entries_.back()->index()) {
       return;
     }
-    const pbEntry &lastAppliedEntry = entries_[index - markerIndex_];
+    const pbEntry &lastAppliedEntry = *entries_[index - markerIndex_];
     if (lastAppliedEntry.index() != index) {
       throw Error(ErrorCode::LogMismatch, "index != last applied entry index");
     }
@@ -236,7 +237,11 @@ class InMemory {
     appliedToTerm_ = lastAppliedEntry.term();
     uint64_t newMarkerIndex = index + 1;
     shrunk_ = true;
-    entries_ = std::vector<pbEntry>(entries_.begin() + newMarkerIndex - markerIndex_, entries_.end());
+    EntryVector newEntries;
+    newEntries.insert(newEntries.end(),
+      std::make_move_iterator(entries_.begin() + newMarkerIndex - markerIndex_),
+      std::make_move_iterator(entries_.end()));
+    entries_.swap(newEntries);
     markerIndex_ = newMarkerIndex;
     ResizeEntrySlice();
     CheckMarkerIndex();
@@ -268,13 +273,13 @@ class InMemory {
     }
   }
 
-  void Merge(const Span<pbEntry> ents)
+  void Merge(const Span<pbEntrySPtr> ents)
   {
-    uint64_t firstNewIndex = ents[0].index();
+    uint64_t firstNewIndex = ents[0]->index();
     ResizeEntrySlice();
     if (firstNewIndex == markerIndex_ + entries_.size()) {
       // |2(snapshot)| |3 4 5 6 7 8| + |9 10 11 ...|, do append
-      CheckEntriesToAppend(Span<pbEntry>(entries_), ents);
+      CheckEntriesToAppend(Span<pbEntrySPtr>(entries_), ents);
       entries_.insert(entries_.end(), ents.begin(), ents.end());
       // FIXME: rate limit
     } else if (firstNewIndex <= markerIndex_) {
@@ -287,9 +292,9 @@ class InMemory {
       // FIXME: rate limit
     } else {
       // |3 4 5 6 7 8| + |5 6 7 8|, do conficts resolution
-      std::vector<pbEntry> existing;
+      EntryVector existing;
       GetEntries(existing, markerIndex_, firstNewIndex);
-      CheckEntriesToAppend(Span<pbEntry>(entries_), ents);
+      CheckEntriesToAppend(Span<pbEntrySPtr>(entries_), ents);
       shrunk_ = false;
       entries_.swap(existing); // ?
       entries_.insert(entries_.end(), ents.begin(), ents.end());
@@ -316,7 +321,7 @@ class InMemory {
   uint64_t minEntrySliceFreeSize_;
   bool shrunk_;
   pbSnapshotSPtr snapshot_;
-  std::vector<pbEntry> entries_;
+  EntryVector entries_;
   uint64_t markerIndex_;
   uint64_t appliedToIndex_;
   uint64_t appliedToTerm_;

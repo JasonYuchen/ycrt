@@ -180,17 +180,50 @@ class Peer {
   // GetUpdate returns the current state of the Peer.
   pbUpdate GetUpdate(bool moreToApply, uint64_t lastApplied)
   {
-    // FIXME
     pbUpdate ud = getUpdate(moreToApply, lastApplied);
     validateUpdate(ud);
     setFastApply(ud);
-    ud.UpdateCommit = getUpdateCommit(ud);
+    setUpdateCommit(ud);
     return ud;
   }
 
-  bool HasUpdate(bool moreToApply);
-  void Commit(const pbUpdate &update);
-  void ReadIndex(pbSystemCtx ctx);
+  // HasUpdate returns a boolean value indicating whether there is any Update
+  // ready to be processed.
+  bool HasUpdate(bool moreToApply)
+  {
+    pbState curr = raft_->raftState();
+    // FIXME
+    if (curr != pbState{} && curr != prevState_) {
+      return true;
+    }
+    if (raft_->logEntry_->GetInMemorySnapshot() != nullptr) {
+      return true;
+    }
+    if (!raft_->messages_->empty()) {
+      return true;
+    }
+    if (!raft_->logEntry_->GetEntriesToSave().empty()) {
+      return true;
+    }
+    if (moreToApply && raft_->logEntry_->HasEntriesToApply()) {
+      return true;
+    }
+    if (!raft_->readyToRead_->empty()) {
+      return true;
+    }
+    if (!raft_->droppedEntries_->empty() ||
+      !raft_->droppedReadIndexes_->empty()) {
+      return true;
+    }
+    return false;
+  }
+
+  // Commit commits the Update state to mark it as processed.
+  void Commit(const pbUpdate &update)
+  {
+    // FIXME
+  }
+  void ReadIndex(pbReadIndexCtx ctx);
   bool HasEntryToApply();
  private:
   Peer(const Config &config,
@@ -247,7 +280,7 @@ class Peer {
 
   void bootstrap(const std::vector<PeerInfo> &peers)
   {
-    std::vector<pbEntry> ents;
+    EntryVector ents;
     std::string config;
     ents.reserve(peers.size());
     for (auto &peer : peers) {
@@ -263,11 +296,11 @@ class Peer {
       if (!cc.SerializeToString(&config)) {
         throw Error(ErrorCode::UnexpectedRaftMessage, "unexpected");
       }
-      ents.emplace_back(pbEntry{});
-      ents.back().set_type(raftpb::ConfigChangeEntry);
-      ents.back().set_term(1);
-      ents.back().set_index(ents.size());
-      ents.back().set_cmd(std::move(config));
+      ents.emplace_back(std::make_shared<pbEntry>());
+      ents.back()->set_type(raftpb::ConfigChangeEntry);
+      ents.back()->set_term(1);
+      ents.back()->set_index(ents.size());
+      ents.back()->set_cmd(std::move(config));
     }
     raft_->logEntry_->Append({ents.data(), ents.size()});
     raft_->logEntry_->SetCommitted(ents.size());
@@ -278,35 +311,86 @@ class Peer {
 
   pbUpdate getUpdate(bool moreEntriesToApply, uint64_t lastApplied)
   {
-    auto ud = pbUpdate{};
+    pbUpdate ud;
+    ud.ClusterID = raft_->clusterID_;
+    ud.NodeID = raft_->nodeID_;
+    ud.EntriesToSave = raft_->logEntry_->GetEntriesToSave();
+    ud.Messages = raft_->messages_; // FIXME
+    ud.LastApplied = lastApplied;
+    ud.FastApply = true;
     if (moreEntriesToApply) {
       ud.CommittedEntries = raft_->logEntry_->GetEntriesToApply();
     }
     if (!ud.CommittedEntries.empty()) {
       ud.MoreCommittedEntries = raft_->logEntry_->HasMoreEntriesToApply(
-        ud.CommittedEntries.back().index());
+        ud.CommittedEntries.back()->index());
     }
-    pbState presentState = raft_->raftState();
-    if (presentState != prevState_) {
-      ud.State = presentState;
-    }
-    // FIXME: inmem snapshot
-    if (raft_->logEntry_);
-    if (!raft_->readyToRead_.empty()) {
-      ud.ReadyToReads = raft_->readyToRead_;
-    }
-    if (!raft_->droppedEntries_.empty()) {
-      ud.DroppedEntries = raft_->droppedEntries_;
-    }
-    if (!raft_->droppedReadIndexes_.empty()) {
-      ud.DroppedReadIndexes = raft_->droppedReadIndexes_;
-    }
+    ud.State = raft_->raftState();
+    ud.Snapshot = raft_->logEntry_->GetInMemorySnapshot();
+    ud.ReadyToReads = raft_->readyToRead_;
+    ud.DroppedEntries = raft_->droppedEntries_;
+    ud.DroppedReadIndexes = raft_->droppedReadIndexes_;
     return ud;
   }
 
+  // TODO: move to the pbUpdate class
   void setFastApply(pbUpdate &ud) {
     ud.FastApply = true;
-    // FIXME
+    // if isEmptySnapshot
+    if (!ud.Snapshot) {
+      ud.FastApply = false;
+    }
+    if (ud.FastApply) {
+      if (!ud.CommittedEntries.empty() && !ud.EntriesToSave.empty()) {
+        uint64_t lastApply = ud.CommittedEntries.back()->index();
+        uint64_t lastSave = ud.EntriesToSave.back()->index();
+        uint64_t firstSave = ud.EntriesToSave.front()->index();
+        if (lastApply >= firstSave && lastApply <= lastSave) {
+          ud.FastApply = false;
+        }
+      }
+    }
+  }
+
+  // TODO: move to the pbUpdate class
+  void validateUpdate(const pbUpdate &ud)
+  {
+    if (ud.State.commit() > 0 && !ud.CommittedEntries.empty()) {
+      uint64_t lastIndex = ud.CommittedEntries.back()->index();
+      if (lastIndex > ud.State.commit()) {
+        throw Error(ErrorCode::InvalidUpdate, log,
+          "try to apply not committed entry: commit={0} < last={1}",
+          ud.State.commit(), lastIndex);
+      }
+    }
+    if (!ud.CommittedEntries.empty() && !ud.EntriesToSave.empty()) {
+      uint64_t lastApply = ud.CommittedEntries.back()->index();
+      uint64_t lastSave = ud.EntriesToSave.back()->index();
+      if (lastApply > lastSave) {
+        throw Error(ErrorCode::InvalidUpdate, log,
+          "try to apply not saved entry: save={0} < apply={1}",
+          lastSave, lastApply);
+      }
+    }
+  }
+
+  // TODO: move to the pbUpdate class
+  void setUpdateCommit(pbUpdate &ud)
+  {
+    pbUpdateCommit &uc = ud.UpdateCommit;
+    uc.ReadyToRead = ud.ReadyToReads->size();
+    uc.LastApplied = ud.LastApplied;
+    if (!ud.CommittedEntries.empty()) {
+      uc.Processed = ud.CommittedEntries.back()->index();
+    }
+    if (!ud.EntriesToSave.empty()) {
+      uc.StableLogIndex = ud.EntriesToSave.back()->index();
+      uc.StableLogTerm = ud.EntriesToSave.back()->term();
+    }
+    if (!ud.Snapshot) {
+      uc.StableSnapshotIndex = ud.Snapshot->index();
+      uc.Processed = std::max(uc.Processed, uc.StableSnapshotIndex);
+    }
   }
 
   slogger log;

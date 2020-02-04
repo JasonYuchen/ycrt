@@ -3,7 +3,7 @@ project(ycrt)
 
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Werror")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
 
 aux_source_directory(${PROJECT_SOURCE_DIR}/logdb SOURCE)
 aux_source_directory(${PROJECT_SOURCE_DIR}/pb SOURCE)

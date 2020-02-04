@@ -16,7 +16,7 @@ namespace raft
 
 using namespace std;
 
-Raft::Raft(const Config &config, LogReaderSPtr logdb)
+Raft::Raft(const Config &config, logdb::LogReaderSPtr logdb)
   : log(Log.GetLogger("raft")),
     clusterID_(config.ClusterID),
     nodeID_(config.NodeID),
@@ -475,7 +475,7 @@ void Raft::send(pbMessageUPtr m)
   assert(m);
   m->set_from(nodeID_);
   finalizeMessageTerm(*m);
-  messages_.emplace_back(std::move(m));
+  messages_->emplace_back(std::move(m));
 }
 
 void Raft::finalizeMessageTerm(pbMessage &m)
@@ -525,7 +525,7 @@ void Raft::broadcastReplicateMessage()
   }
 }
 
-void Raft::sendHeartbeatMessage(uint64_t to, pbSystemCtx hint, uint64_t match)
+void Raft::sendHeartbeatMessage(uint64_t to, pbReadIndexCtx hint, uint64_t match)
 {
   uint64_t commit = min(match, logEntry_->Committed());
   auto m = make_unique<pbMessage>();
@@ -547,9 +547,9 @@ void Raft::broadcastHeartbeatMessage()
   }
 }
 
-void Raft::broadcastHeartbeatMessage(pbSystemCtx hint)
+void Raft::broadcastHeartbeatMessage(pbReadIndexCtx hint)
 {
-  auto zeroHint = pbSystemCtx{0, 0};
+  auto zeroHint = pbReadIndexCtx{0, 0};
   for (auto &node : getVotingMembers()) {
     if (node.first != nodeID_) {
       sendHeartbeatMessage(node.first, hint, node.second.Match());
@@ -585,6 +585,7 @@ pbMessageUPtr Raft::makeInstallSnapshotMessage(uint64_t to)
   }
   // FIXME
   m->set_allocated_snapshot(new pbSnapshot(*snapshot));
+  return m;
 }
 
 pbMessageUPtr Raft::makeReplicateMessage(
@@ -597,14 +598,14 @@ pbMessageUPtr Raft::makeReplicateMessage(
     return nullptr;
   }
   uint64_t term = _term.GetOrThrow();
-  StatusWith<vector<pbEntry>> _entries =
+  StatusWith<EntryVector> _entries =
     logEntry_->GetEntriesFromStart(next, maxSize);
   if (_entries.Code() == ErrorCode::LogCompacted) {
     return nullptr;
   }
-  vector<pbEntry> &entries = _entries.GetMutableOrThrow();
+  EntryVector &entries = _entries.GetMutableOrThrow();
   if (!entries.empty()) {
-    uint64_t lastIndex = entries.rbegin()->index();
+    uint64_t lastIndex = entries.back()->index();
     uint64_t expected = entries.size() + next - 1;
     if (lastIndex != expected) {
       throw Error(ErrorCode::LogMismatch, log,
@@ -621,22 +622,22 @@ pbMessageUPtr Raft::makeReplicateMessage(
   m->set_type(raftpb::Replicate);
   m->set_log_index(next - 1);
   m->set_log_term(term);
-  for (auto &item : entries) {
-    m->mutable_entries()->Add(std::move(item));
+  for (auto &ent : entries) {
+    m->mutable_entries()->Add(pbEntry(*ent));
   }
   m->set_commit(logEntry_->Committed());
   return m;
 }
 
-vector<pbEntry> Raft::makeMetadataEntries(const vector<pbEntry> &entries)
+EntryVector Raft::makeMetadataEntries(const EntryVector &entries)
 {
-  vector<pbEntry> meta;
+  EntryVector meta;
   for (auto &entry : entries) {
-    if (entry.type() != raftpb::ConfigChangeEntry) {
-      meta.emplace_back(pbEntry{});
-      meta.back().set_type(raftpb::MetadataEntry);
-      meta.back().set_index(entry.index());
-      meta.back().set_term(entry.term());
+    if (entry->type() != raftpb::ConfigChangeEntry) {
+      meta.emplace_back(std::make_shared<pbEntry>());
+      meta.back()->set_type(raftpb::MetadataEntry);
+      meta.back()->set_index(entry->index());
+      meta.back()->set_term(entry->term());
     } else {
       meta.push_back(entry);
     }
@@ -655,13 +656,13 @@ void Raft::finalizeWitnessSnapshot(pbSnapshot &s)
 
 void Raft::reportDroppedConfigChange(pbEntry &&e)
 {
-  droppedEntries_.emplace_back(std::move(e));
+  droppedEntries_->emplace_back(make_shared<pbEntry>(std::move(e)));
 }
 
 void Raft::reportDroppedProposal(pbMessage &m)
 {
-  for (auto &entry : m.entries()) {
-    droppedEntries_.emplace_back(entry);
+  for (auto &entry : *m.mutable_entries()) {
+    droppedEntries_->emplace_back(make_shared<pbEntry>(std::move(entry)));
   }
   if (listener_) {
     auto info = server::ProposalInfo{};
@@ -676,7 +677,7 @@ void Raft::reportDroppedProposal(pbMessage &m)
 
 void Raft::reportDroppedReadIndex(pbMessage &m)
 {
-  droppedReadIndexes_.emplace_back(pbSystemCtx{m.hint(), m.hint_high()});
+  droppedReadIndexes_->emplace_back(pbReadIndexCtx{m.hint(), m.hint_high()});
   if (listener_) {
     auto info = server::ReadIndexInfo{};
     info.ClusterID = clusterID_;
@@ -709,12 +710,12 @@ bool Raft::tryCommit()
   return logEntry_->TryCommit(q, term_);
 }
 
-void Raft::appendEntries(Span<pbEntry> entries)
+void Raft::appendEntries(Span<pbEntrySPtr> entries)
 {
   uint64_t lastIndex = logEntry_->LastIndex();
   for (auto &entry : entries) {
-    entry.set_term(term_);
-    entry.set_index(1 + lastIndex++);
+    entry->set_term(term_);
+    entry->set_index(1 + lastIndex++);
   }
   logEntry_->Append(entries);
   remotes_[nodeID_].TryUpdate(logEntry_->LastIndex());
@@ -839,8 +840,8 @@ void Raft::becomeLeader()
   reset(term_);
   setLeaderID(nodeID_);
   preLeaderPromotionHandleConfigChange();
-  vector<pbEntry> null{pbEntry{}};
-  null[0].set_type(raftpb::ApplicationEntry);
+  EntryVector null{std::make_shared<pbEntry>()};
+  null[0]->set_type(raftpb::ApplicationEntry);
   appendEntries({null.data(), null.size()});
   log->info("{0}: became a leader", describe());
 }
@@ -1102,11 +1103,11 @@ uint64_t Raft::getPendingConfigChangeCount()
       return count;
     }
     for (auto &entry : entries.GetOrThrow()) {
-      if (entry.type() == raftpb::ConfigChangeEntry) {
+      if (entry->type() == raftpb::ConfigChangeEntry) {
         count++;
       }
     }
-    index = entries.GetOrThrow().back().index() + 1;
+    index = entries.GetOrThrow().back()->index() + 1;
   }
 }
 
@@ -1183,11 +1184,11 @@ void Raft::handleReplicate(pbMessage &m)
   }
   if (logEntry_->MatchTerm(m.log_index(), m.log_term())) {
     // FIXME : remove ent
-    vector<pbEntry> ent;
+    EntryVector entries;
     for (auto &entry : m.entries()) {
-      ent.emplace_back(entry);
+      entries.emplace_back(make_shared<pbEntry>(std::move(entry)));
     }
-    logEntry_->TryAppend(m.log_index(), {ent.data(), ent.size()});
+    logEntry_->TryAppend(m.log_index(), {entries.data(), entries.size()});
     uint64_t lastIndex = m.log_index() + m.entries().size();
     logEntry_->CommitTo(min(lastIndex, m.commit()));
     resp->set_log_index(lastIndex);
@@ -1377,9 +1378,9 @@ void Raft::handleLeaderPropose(pbMessage &m)
     }
   }
   // FIXME: remove ent
-  vector<pbEntry> ent;
+  EntryVector ent;
   for (auto &entry : m.entries()) {
-    ent.emplace_back(entry);
+    ent.emplace_back(std::make_shared<pbEntry>(entry));
   }
   appendEntries({ent.data(), ent.size()});
   broadcastReplicateMessage();
@@ -1415,9 +1416,7 @@ bool Raft::hasCommittedEntryAtCurrentTerm()
 void Raft::handleLeaderReadIndex(pbMessage &m)
 {
   mustBeOrThrow(Leader);
-  auto ctx = pbSystemCtx{};
-  ctx.Low = m.hint();
-  ctx.High = m.hint_high();
+  pbReadIndexCtx ctx{m.hint(), m.hint_high()};
   if (witnesses_.find(m.from()) != witnesses_.end()) {
     log->error("{0}: dropped ReadIndex from witness {1}", describe(), m.from());
   } else if (!isSingleNodeQuorum()) {
@@ -1432,7 +1431,7 @@ void Raft::handleLeaderReadIndex(pbMessage &m)
     readIndex_.AddRequest(logEntry_->Committed(), ctx, m.from());
     broadcastHeartbeatMessage(ctx);
   } else {
-    readyToRead_.emplace_back(pbReadyToRead{logEntry_->Committed(), ctx});
+    readyToRead_->emplace_back(pbReadyToRead{logEntry_->Committed(), ctx});
     if (m.from() != nodeID_ && observers_.find(m.from()) != observers_.end()) {
       auto resp = make_unique<pbMessage>();
       resp->set_to(m.from());
@@ -1535,13 +1534,11 @@ void Raft::handleLeaderLeaderTransfer(pbMessage &m)
 
 void Raft::handleLeaderReadIndexConfirmation(pbMessage &m)
 {
-  auto ctx = pbSystemCtx{};
-  ctx.Low = m.hint();
-  ctx.High = m.hint_high();
+  pbReadIndexCtx ctx{m.hint(), m.hint_high()};
   vector<ReadStatus> readStatus = readIndex_.Confirm(ctx, m.from(), quorum());
   for (auto &s : readStatus) {
     if (s.From == NoNode || s.From == nodeID_) {
-      readyToRead_.emplace_back(pbReadyToRead{s.Index, s.Ctx});
+      readyToRead_->emplace_back(pbReadyToRead{s.Index, s.Ctx});
     } else {
       auto resp = make_unique<pbMessage>();
       resp->set_to(s.From);
@@ -1684,12 +1681,10 @@ void Raft::handleFollowerLeaderTransfer(pbMessage &m)
 
 void Raft::handleFollowerReadIndexResp(pbMessage &m)
 {
-  auto ctx = pbSystemCtx{};
-  ctx.Low = m.hint();
-  ctx.High = m.hint_high();
+  pbReadIndexCtx ctx{m.hint(), m.hint_high()};
   leaderIsAvailable();
   setLeaderID(m.from());
-  readyToRead_.emplace_back(pbReadyToRead{m.log_index(), ctx});
+  readyToRead_->emplace_back(pbReadyToRead{m.log_index(), ctx});
 }
 
 void Raft::handleFollowerInstallSnapshot(pbMessage &m)
@@ -1736,7 +1731,7 @@ void Raft::handleCandidateReadIndex(pbMessage &m)
 {
   log->warn("{0}: dropped ReadIndex as no available leader", describe());
   reportDroppedReadIndex(m);
-  droppedReadIndexes_.emplace_back(pbSystemCtx{m.hint(), m.hint_high()});
+  droppedReadIndexes_->emplace_back(pbReadIndexCtx{m.hint(), m.hint_high()});
 }
 
 // implies that there is a leader for current term == m.term()

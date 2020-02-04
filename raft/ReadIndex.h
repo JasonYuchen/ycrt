@@ -19,11 +19,11 @@ namespace raft
 {
 
 struct ReadStatus {
-  ReadStatus(uint64_t index, uint64_t from, pbSystemCtx ctx)
+  ReadStatus(uint64_t index, uint64_t from, pbReadIndexCtx ctx)
     : Index(index), From(from), Ctx(ctx), Confirmed() {}
   uint64_t Index;
   uint64_t From;
-  pbSystemCtx Ctx;
+  pbReadIndexCtx Ctx;
   std::set<uint64_t> Confirmed;
 };
 
@@ -32,7 +32,7 @@ class ReadIndex {
   ReadIndex() = default;
   DEFAULT_COPY_AND_ASSIGN(ReadIndex);
 
-  void AddRequest(uint64_t index, pbSystemCtx ctx, uint64_t from)
+  void AddRequest(uint64_t index, pbReadIndexCtx ctx, uint64_t from)
   {
     if (pending_.find(ctx) != pending_.end()) {
       return;
@@ -51,7 +51,7 @@ class ReadIndex {
     queue_.emplace_back(ctx);
     pending_.insert({ctx, ReadStatus{index, from, ctx}});
   }
-  std::vector<ReadStatus> Confirm(pbSystemCtx ctx, uint64_t from, uint64_t quorum)
+  std::vector<ReadStatus> Confirm(pbReadIndexCtx ctx, uint64_t from, uint64_t quorum)
   {
     auto it = pending_.find(ctx);
     if (it == pending_.end()) {
@@ -77,7 +77,7 @@ class ReadIndex {
           }
           cCtx.Index = status->second.Index;
         }
-        queue_ = std::vector<pbSystemCtx>(queue_.begin() + done, queue_.end());
+        queue_ = std::vector<pbReadIndexCtx>(queue_.begin() + done, queue_.end());
         for (auto &cCtx : confirm) {
           pending_.erase(cCtx.Ctx);
         }
@@ -87,12 +87,13 @@ class ReadIndex {
         return confirm;
       }
     }
+    return {};
   }
   bool HasPendingRequest() const
   {
     return !queue_.empty();
   }
-  pbSystemCtx BackCtx() const
+  pbReadIndexCtx BackCtx() const
   {
     return queue_.back();
   }
@@ -102,8 +103,8 @@ class ReadIndex {
     queue_.clear();
   }
  private:
-  std::unordered_map<pbSystemCtx, ReadStatus, SystemCtxHash> pending_;
-  std::vector<pbSystemCtx> queue_;
+  std::unordered_map<pbReadIndexCtx, ReadStatus, ReadIndexCtxHash> pending_;
+  std::vector<pbReadIndexCtx> queue_;
 };
 
 } // namespace raft
