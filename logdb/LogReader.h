@@ -161,6 +161,7 @@ class LogReader {
     std::unique_ptr<LogReader> reader(new LogReader(clusterID, nodeID, std::move(logdb)));
     return reader;
   }
+  DISALLOW_COPY_AND_ASSIGN(LogReader);
 
   // GetRange returns the range of the entries in LogReader.
   std::pair<uint64_t, uint64_t> GetRange()

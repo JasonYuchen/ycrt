@@ -22,7 +22,6 @@ TEST(Transport, Client)
   auto resolver1 = Nodes::New([](uint64_t){return 0;});
   resolver1->AddNode(1, 2, "127.0.0.1:9090");
   auto transport1 = Transport::New(nhConfig1, *resolver1, handler, [](uint64_t,uint64_t){return "no";}, 1);
-  transport1->Start();
 
   auto nhConfig2 = NodeHostConfig();
   nhConfig2.DeploymentID = 10;
@@ -30,7 +29,6 @@ TEST(Transport, Client)
   nhConfig2.ListenAddress = "127.0.0.1:9090";
   auto resolver2 = Nodes::New([](uint64_t){return 0;});
   auto transport2 = Transport::New(nhConfig2, *resolver2, handler, [](uint64_t,uint64_t){return "no";}, 1);
-  transport2->Start();
   Log.GetLogger("transport")->info("test start");
 
   for (int i = 0; i < 20; ++i) {

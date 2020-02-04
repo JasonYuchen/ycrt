@@ -2,8 +2,8 @@
 // Created by jason on 2019/12/31.
 //
 
-#ifndef YCRT_TRANSPORT_SNAPSHOTCHUNK_H_
-#define YCRT_TRANSPORT_SNAPSHOTCHUNK_H_
+#ifndef YCRT_TRANSPORT_SNAPSHOTCHUNKMANAGER_H_
+#define YCRT_TRANSPORT_SNAPSHOTCHUNKMANAGER_H_
 
 #include <stdint.h>
 #include <string>
@@ -11,6 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include "utils/Utils.h"
 #include "pb/RaftMessage.h"
 
 namespace ycrt
@@ -19,21 +20,23 @@ namespace ycrt
 namespace transport
 {
 
-class SnapshotChunk {
+class Transport;
+class SnapshotChunkManager {
  public:
-  std::unique_ptr<SnapshotChunk> New(
-    std::function<void(pbMessageBatchUPtr)> &&onReceive,
-    std::function<void(uint64_t, uint64_t, uint64_t)> &&confirm,
-    std::function<uint64_t()> &&deploymentIDFunc,
-    std::function<std::string(uint64_t, uint64_t)> &&snapshotDirFunc);
+  std::unique_ptr<SnapshotChunkManager> New(
+    Transport *transport_,
+    //std::function<void(pbMessageBatchUPtr)> &&onReceive, // Transport::handleRequest
+    //std::function<void(uint64_t, uint64_t, uint64_t)> &&confirm, // Transport::handleSnapshotConfirm
+    //std::function<uint64_t()> &&deploymentIDFunc, // Transport::deploymentID_
+    std::function<std::string(uint64_t, uint64_t)> &&getSnapshotDir);
  private:
-  SnapshotChunk();
+  SnapshotChunkManager();
+
+  slogger log;
+  Transport *transport_;
   uint64_t currentTick_;
   bool validate_;
   std::function<std::string(uint64_t, uint64_t)> getSnapshotDir_;
-  std::function<void(pbMessageBatchUPtr)> onReceive_;
-  std::function<void(uint64_t, uint64_t, uint64_t)> confirm_;
-  std::function<uint64_t()> getDeploymentID_;
   struct track {
     pbSnapshotChunkSPtr firstChunk;
     std::vector<pbSnapshotFileSPtr> extraFiles;
@@ -54,4 +57,4 @@ class SnapshotChunk {
 } // namespace ycrt
 
 
-#endif //YCRT_TRANSPORT_SNAPSHOTCHUNK_H_
+#endif //YCRT_TRANSPORT_SNAPSHOTCHUNKMANAGER_H_

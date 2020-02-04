@@ -50,6 +50,7 @@ class LogEntry {
       processed_(logDB_->GetRange().first - 1)
   {
   }
+  DISALLOW_COPY_AND_ASSIGN(LogEntry);
 
   uint64_t Committed() const
   {

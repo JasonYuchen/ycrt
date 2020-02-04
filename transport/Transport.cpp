@@ -31,6 +31,7 @@ TransportUPtr Transport::New(
 {
   TransportUPtr t(new Transport(
     nhConfig, resolver, handlers, std::move(snapshotDirFunc), ioContexts));
+  t->Start();
   return t;
 }
 
@@ -48,10 +49,10 @@ Transport::Transport(
     ioctxIdx_(0),
     ioctxs_(),
     acceptor_(io_, getEndpoint(string_view(nhConfig.ListenAddress))),
-    streamConnections_(Soft::ins().StreamConnections),
-    sendQueueLength_(Soft::ins().SendQueueLength),
-    getConnectedTimeoutS_(Soft::ins().GetConnectedTimeoutS),
-    idleTimeoutS_(60), // TODO: add idleTimeoutS to soft?, add idleTimeoutS_ to Asio to handle timeout events
+//    streamConnections_(Soft::ins().StreamConnections),
+//    sendQueueLength_(Soft::ins().SendQueueLength),
+//    getConnectedTimeoutS_(Soft::ins().GetConnectedTimeoutS),
+//    idleTimeoutS_(60), // TODO: add idleTimeoutS to soft?, add idleTimeoutS_ to Asio to handle timeout events
     deploymentID_(nhConfig.DeploymentID),
     mutex_(),
     sendChannels_(),
@@ -67,11 +68,15 @@ Transport::Transport(
 
 bool Transport::AsyncSendMessage(pbMessageUPtr m)
 {
+  if (m->type() == raftpb::InstallSnapshot) {
+    throw Error(ErrorCode::UnexpectedRaftMessage, log,
+      "Snapshot must be sent via its own channel");
+  }
   NodesRecordSPtr node = resolver_.Resolve(m->cluster_id(), m->to());
   if (node == nullptr) {
     log->warn(
-      "{0} do not have the address for {1:d}:{2:d}, dropping a message",
-      sourceAddress_, m->cluster_id(), m->to());
+      "{0} do not have the address for {1}, dropping a message",
+      sourceAddress_, FmtClusterNode(m->cluster_id(), m->to()));
     return false;
   }
   SendChannelSPtr ch;
@@ -89,6 +94,21 @@ bool Transport::AsyncSendMessage(pbMessageUPtr m)
   }
   ch->AsyncSendMessage(std::move(m));
   return true;
+}
+
+bool Transport::AsyncSendSnapshot(pbMessageUPtr m)
+{
+  if (m->type() != raftpb::InstallSnapshot) {
+    throw Error(ErrorCode::UnexpectedRaftMessage, log,
+      "Snapshot channel only sends snapshots");
+  }
+  NodesRecordSPtr node = resolver_.Resolve(m->cluster_id(), m->to());
+  if (node == nullptr) {
+    log->warn(
+      "{0} do not have the address for {1}, dropping a message",
+      sourceAddress_, FmtClusterNode(m->cluster_id(), m->to()));
+    return false;
+  }
 }
 
 void Transport::Start()
@@ -171,6 +191,24 @@ void Transport::handleRequest(pbMessageBatchUPtr m)
 void Transport::handleSnapshotChunk(pbSnapshotChunkSPtr m)
 {
   // FIXME
+}
+
+void Transport::handleSnapshotConfirm(
+  uint64_t clusterID,
+  uint64_t nodeID,
+  uint64_t from)
+{
+  handlers_.handleSnapshot(clusterID, nodeID, from);
+}
+
+void Transport::handleUnreachable(const std::string &address)
+{
+  vector<NodeInfo> remotes = resolver_.ReverseResolve(address);
+  log->info("node {0} becomes unreachable, affecting {1} raft nodes",
+    address, remotes.size());
+  for (auto &node : remotes) {
+    handlers_.handleUnreachable(node.ClusterID, node.NodeID);
+  }
 }
 
 } // namespace transport

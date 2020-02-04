@@ -17,6 +17,7 @@
 #include "settings/Hard.h"
 #include "Nodes.h"
 #include "Channel.h"
+#include "SnapshotChunkManager.h"
 
 namespace ycrt
 {
@@ -46,7 +47,7 @@ class Transport {
   uint64_t GetDeploymentID() { return deploymentID_; }
 
   bool AsyncSendMessage(pbMessageUPtr m);
-  //bool AsyncSendSnapshot(pbMessageUPtr m);
+  bool AsyncSendSnapshot(pbMessageUPtr m);
   //std::shared_ptr<Sink> GetStreamConnection(uint64_t clusterID, uint64_t nodeID);
   void Start();
   void Stop();
@@ -60,8 +61,15 @@ class Transport {
     std::function<std::string(uint64_t, uint64_t)> &&snapshotDirFunc,
     uint64_t ioContexts);
   boost::asio::io_context &nextIOContext();
+  // receive a normal message
   void handleRequest(pbMessageBatchUPtr m);
+  // receive a snapshot chunk
   void handleSnapshotChunk(pbSnapshotChunkSPtr m);
+  // receive the last piece of snapshot and notify the corresponding cluster
+  void handleSnapshotConfirm(uint64_t clusterID, uint64_t nodeID, uint64_t from);
+  // remote node is unreachable, notify the corresponding cluster
+  void handleUnreachable(const std::string &address);
+
   slogger log;
   boost::asio::io_context io_;
   boost::asio::io_context::work worker_;
@@ -77,10 +85,10 @@ class Transport {
   std::atomic_uint64_t ioctxIdx_;
   std::vector<std::unique_ptr<ioctx>> ioctxs_;
   boost::asio::ip::tcp::acceptor acceptor_;
-  uint64_t streamConnections_;
-  uint64_t sendQueueLength_;
-  uint64_t getConnectedTimeoutS_;
-  uint64_t idleTimeoutS_;
+//  uint64_t streamConnections_;
+//  uint64_t sendQueueLength_;
+//  uint64_t getConnectedTimeoutS_;
+//  uint64_t idleTimeoutS_;
   uint64_t deploymentID_;
 
   std::mutex mutex_;

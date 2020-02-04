@@ -61,6 +61,7 @@ class InMemory {
       appliedToTerm_(),
       savedTo_(lastIndex)
   {}
+  DISALLOW_COPY_AND_ASSIGN(InMemory);
 
   uint64_t GetMarkerIndex() const
   {

@@ -121,6 +121,28 @@ class RecvChannel : public std::enable_shared_from_this<RecvChannel> {
 };
 using RecvChannelSPtr = std::shared_ptr<RecvChannel>;
 
+class SnapshotLane : public std::enable_shared_from_this<SnapshotLane> {
+ public:
+  explicit SnapshotLane(
+    Transport *transport,
+    boost::asio::io_context &io);
+ private:
+  slogger log;
+  Transport *transport_;
+  std::atomic_bool isConnected_;
+  std::atomic_bool inQueue_;
+  std::string sourceAddress_;
+  boost::asio::io_context &io_;
+  boost::asio::ip::tcp::socket socket_;
+  boost::asio::ip::tcp::resolver resolver_;
+  boost::asio::steady_timer idleTimer_;
+  bool stopped_;
+  NodesRecordSPtr nodeRecord_;
+  BlockingConcurrentQueueSPtr<pbMessageUPtr> bufferQueue_;
+  std::queue<pbMessageBatchUPtr> outputQueue_;
+  std::string buffer_;
+};
+
 } // namespace transport
 
 } // namespace ycrt

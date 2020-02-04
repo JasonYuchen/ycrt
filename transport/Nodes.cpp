@@ -47,6 +47,8 @@ Nodes::Record::Record(const std::string &key) // key = 127.0.0.1:8080-1
 {
 }
 
+// AddRemoteAddress remembers the specified address obtained from the source
+// of the incoming message.
 void Nodes::AddRemoteAddress(
   uint64_t clusterID,
   uint64_t nodeID,
@@ -67,6 +69,7 @@ void Nodes::AddRemoteAddress(
   }
 }
 
+// Resolve looks up the Addr of the specified node.
 NodesRecordSPtr Nodes::Resolve(uint64_t clusterID, uint64_t nodeID)
 {
   assert(clusterID != 0);
@@ -95,6 +98,8 @@ NodesRecordSPtr Nodes::Resolve(uint64_t clusterID, uint64_t nodeID)
   return addr;
 }
 
+// ReverseResolve does the reverse lookup for the specified address. A list
+// of node NodeInfos are returned for nodes that match the specified address
 vector<NodeInfo> Nodes::ReverseResolve(const string &address)
 {
   assert(!address.empty());
@@ -108,6 +113,7 @@ vector<NodeInfo> Nodes::ReverseResolve(const string &address)
   return infos;
 }
 
+// AddNode add a new node.
 void Nodes::AddNode(
   uint64_t clusterID,
   uint64_t nodeID,
@@ -132,6 +138,7 @@ void Nodes::RemoveNode(uint64_t clusterID, uint64_t nodeID)
   addrs_.erase(key);
 }
 
+// RemoveCluster removes all nodes info associated with the specified cluster
 void Nodes::RemoveCluster(uint64_t clusterID) // set the sp to nullptr indicating the removal
 {
   assert(clusterID != 0);
@@ -143,6 +150,7 @@ void Nodes::RemoveCluster(uint64_t clusterID) // set the sp to nullptr indicatin
   }
 }
 
+// RemoveAllPeers removes all remotes.
 void Nodes::RemoveAllPeers()
 {
   lock_guard<mutex> guard(addrsMutex_);
@@ -151,9 +159,7 @@ void Nodes::RemoveAllPeers()
 
 string Nodes::getConnectionKey(const string &address, uint64_t clusterID)
 {
-  stringstream key;
-  key << address << '-' << getPartitionID_(clusterID);
-  return key.str();
+  return fmt::format("{0}-{1}", address, getPartitionID_(clusterID));
 }
 
 } // namespace transport

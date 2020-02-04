@@ -22,6 +22,7 @@ namespace raft
 // Peer is the friend class of Raft
 class Peer {
  public:
+  DISALLOW_COPY_AND_ASSIGN(Peer);
   struct PeerInfo {
     uint64_t NodeID;
     std::string Address;
@@ -108,6 +109,17 @@ class Peer {
     raft_->Handle(m);
   }
 
+  // ReadIndex starts a ReadIndex operation. The ReadIndex protocol is defined in
+  // the section 6.4 of the Raft thesis.
+  void ReadIndex(pbReadIndexCtx ctx)
+  {
+    pbMessage m;
+    m.set_type(raftpb::ReadIndex);
+    m.set_hint(ctx.Low);
+    m.set_hint_high(ctx.High);
+    raft_->Handle(m);
+  }
+
   // ApplyConfigChange applies a raft membership change to the local raft node.
   void ApplyConfigChange(const pbConfigChange &configChange)
   {
@@ -178,7 +190,7 @@ class Peer {
   }
 
   // GetUpdate returns the current state of the Peer.
-  pbUpdate GetUpdate(bool moreToApply, uint64_t lastApplied)
+  pbUpdate GetUpdate(bool moreToApply, uint64_t lastApplied) const
   {
     pbUpdate ud = getUpdate(moreToApply, lastApplied);
     validateUpdate(ud);
@@ -189,10 +201,10 @@ class Peer {
 
   // HasUpdate returns a boolean value indicating whether there is any Update
   // ready to be processed.
-  bool HasUpdate(bool moreToApply)
+  bool HasUpdate(bool moreToApply) const
   {
     pbState curr = raft_->raftState();
-    // FIXME
+    // FIXME: empty state?
     if (curr != pbState{} && curr != prevState_) {
       return true;
     }
@@ -221,10 +233,23 @@ class Peer {
   // Commit commits the Update state to mark it as processed.
   void Commit(const pbUpdate &update)
   {
-    // FIXME
+    raft_->messages_->clear();
+    raft_->droppedEntries_->clear();
+    raft_->droppedReadIndexes_->clear();
+    if (update.State != pbState{}) {
+      prevState_ = update.State;
+    }
+    if (update.UpdateCommit.ReadyToRead > 0) {
+      raft_->readyToRead_->clear();
+    }
+    raft_->logEntry_->CommitUpdate(update.UpdateCommit);
   }
-  void ReadIndex(pbReadIndexCtx ctx);
-  bool HasEntryToApply();
+
+  bool HasEntryToApply() const
+  {
+    return raft_->logEntry_->HasEntriesToApply();
+  }
+
  private:
   Peer(const Config &config,
     logdb::LogReaderSPtr logdb,
@@ -309,7 +334,7 @@ class Peer {
     }
   }
 
-  pbUpdate getUpdate(bool moreEntriesToApply, uint64_t lastApplied)
+  pbUpdate getUpdate(bool moreEntriesToApply, uint64_t lastApplied) const
   {
     pbUpdate ud;
     ud.ClusterID = raft_->clusterID_;
@@ -334,7 +359,8 @@ class Peer {
   }
 
   // TODO: move to the pbUpdate class
-  void setFastApply(pbUpdate &ud) {
+  void setFastApply(pbUpdate &ud) const
+  {
     ud.FastApply = true;
     // if isEmptySnapshot
     if (!ud.Snapshot) {
@@ -353,7 +379,7 @@ class Peer {
   }
 
   // TODO: move to the pbUpdate class
-  void validateUpdate(const pbUpdate &ud)
+  void validateUpdate(const pbUpdate &ud) const
   {
     if (ud.State.commit() > 0 && !ud.CommittedEntries.empty()) {
       uint64_t lastIndex = ud.CommittedEntries.back()->index();
@@ -375,7 +401,7 @@ class Peer {
   }
 
   // TODO: move to the pbUpdate class
-  void setUpdateCommit(pbUpdate &ud)
+  void setUpdateCommit(pbUpdate &ud) const
   {
     pbUpdateCommit &uc = ud.UpdateCommit;
     uc.ReadyToRead = ud.ReadyToReads->size();
