@@ -47,7 +47,7 @@ using pbBootstrapSPtr = std::shared_ptr<raftpb::Bootstrap>;
 using pbBootstrapUPtr = std::unique_ptr<raftpb::Bootstrap>;
 
 // FIXME
-using MessageVector = std::vector<pbMessageSPtr>;
+using MessageVector = std::vector<pbMessageUPtr>;
 using MessageVectorSPtr = std::shared_ptr<MessageVector>;
 using EntryVector = std::vector<pbEntrySPtr>;
 using EntryVectorSPtr = std::shared_ptr<EntryVector>;
