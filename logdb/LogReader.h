@@ -166,7 +166,7 @@ class LogReader {
   // GetRange returns the range of the entries in LogReader.
   std::pair<uint64_t, uint64_t> GetRange()
   {
-    std::unique_lock<std::mutex> guard(mutex_);
+    std::lock_guard<std::mutex> guard(mutex_);
     return {firstIndex(), lastIndex()};
   }
 
@@ -176,7 +176,7 @@ class LogReader {
     if (length == 0) {
       return;
     }
-    std::unique_lock<std::mutex> guard(mutex_);
+    std::lock_guard<std::mutex> guard(mutex_);
     uint64_t curfirst = firstIndex();
     uint64_t setlast = index + length - 1;
     // current range includes the [index, index+length)
@@ -204,14 +204,14 @@ class LogReader {
   // GetNodeState returns the persistent state of the node
   pbState GetNodeState()
   {
-    std::unique_lock<std::mutex> guard(mutex_);
+    std::lock_guard<std::mutex> guard(mutex_);
     return state_;
   }
 
   // SetNodeState sets the persistent state known to LogReader.
   void SetNodeState(const pbState &state)
   {
-    std::unique_lock<std::mutex> gurad(mutex_);
+    std::lock_guard<std::mutex> gurad(mutex_);
     state_ = state;
   }
 
@@ -219,7 +219,7 @@ class LogReader {
   // LogReader.
   pbSnapshotSPtr GetSnapshot()
   {
-    std::unique_lock<std::mutex> guard(mutex_);
+    std::lock_guard<std::mutex> guard(mutex_);
     return snapshot_;
   }
 
@@ -227,7 +227,7 @@ class LogReader {
   // keeps the metadata of the specified snapshot.
   Status SetSnapshot(pbSnapshotSPtr s)
   {
-    std::unique_lock<std::mutex> guard(mutex_);
+    std::lock_guard<std::mutex> guard(mutex_);
     if (snapshot_->index() >= s->index()) {
       return ErrorCode::SnapshotOutOfDate;
     }
@@ -239,7 +239,7 @@ class LogReader {
   // updates the entry range known to LogReader (apply the specified snapshot).
   Status ApplySnapshot(pbSnapshotSPtr s)
   {
-    std::unique_lock<std::mutex> guard(mutex_);
+    std::lock_guard<std::mutex> guard(mutex_);
     if (snapshot_->index() >= s->index()) {
       return ErrorCode::SnapshotOutOfDate;
     }
@@ -253,7 +253,7 @@ class LogReader {
   // Term returns the corresponding entry term of a specified entry index
   StatusWith<uint64_t> Term(uint64_t index)
   {
-    std::unique_lock<std::mutex> guard(mutex_);
+    std::lock_guard<std::mutex> guard(mutex_);
     return term(index);
   }
 
@@ -267,7 +267,7 @@ class LogReader {
     if (low > high) {
       return ErrorCode::OutOfRange;
     }
-    std::unique_lock<std::mutex> guard(mutex_);
+    std::lock_guard<std::mutex> guard(mutex_);
     return getEntries(entries, low, high, maxSize);
   }
 
@@ -275,7 +275,7 @@ class LogReader {
   // specified by index.
   Status Compact(uint64_t index)
   {
-    std::unique_lock<std::mutex> guard(mutex_);
+    std::lock_guard<std::mutex> guard(mutex_);
     if (index < markerIndex_) {
       return ErrorCode::LogCompacted;
     }
