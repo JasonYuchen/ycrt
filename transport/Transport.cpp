@@ -26,11 +26,11 @@ TransportUPtr Transport::New(
   const NodeHostConfig &nhConfig,
   Nodes &resolver,
   RaftMessageHandler &handlers,
-  function<string(uint64_t, uint64_t)> &&snapshotDirFunc,
+  server::SnapshotLocator &&locator,
   uint64_t ioContexts)
 {
   TransportUPtr t(new Transport(
-    nhConfig, resolver, handlers, std::move(snapshotDirFunc), ioContexts));
+    nhConfig, resolver, handlers, std::move(locator), ioContexts));
   t->Start();
   return t;
 }
@@ -39,7 +39,7 @@ Transport::Transport(
   const NodeHostConfig &nhConfig,
   Nodes &resolver,
   RaftMessageHandler &handlers,
-  function<string(uint64_t, uint64_t)> &&snapshotDirFunc,
+  server::SnapshotLocator &&locator,
   uint64_t ioContexts)
   : streamConnections_(Soft::ins().StreamConnections),
     sendQueueLength_(Soft::ins().SendQueueLength),
@@ -85,7 +85,7 @@ bool Transport::AsyncSendMessage(pbMessageUPtr m)
     auto it = sendChannels_.find(node->Key);
     if (it == sendChannels_.end()) {
       ch = make_shared<SendChannel>(
-        this, nextIOContext(), sourceAddress_, node, Soft::ins().SendQueueLength);
+        *this, nextIOContext(), sourceAddress_, node, sendQueueLength_);
       sendChannels_[node->Key] = ch;
       ch->Start();
     } else {
@@ -113,7 +113,7 @@ bool Transport::AsyncSendSnapshot(pbMessageUPtr m)
 
 void Transport::Start()
 {
-  auto conn = make_shared<RecvChannel>(this, nextIOContext());
+  auto conn = make_shared<RecvChannel>(*this, nextIOContext());
   acceptor_.async_accept(
     conn->socket(),
     [conn, this](const error_code &ec) mutable {

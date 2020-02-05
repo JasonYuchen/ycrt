@@ -39,7 +39,7 @@ class Transport {
     const NodeHostConfig  &nhConfig,
     Nodes &resolver,
     RaftMessageHandler &handlers,
-    std::function<std::string(uint64_t, uint64_t)> &&snapshotDirFunc,
+    server::SnapshotLocator &&locator,
     uint64_t ioContexts);
   //std::string name();
   //void setUnmanagedDeploymentID();
