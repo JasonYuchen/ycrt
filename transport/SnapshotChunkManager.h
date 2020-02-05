@@ -24,17 +24,34 @@ class Transport;
 class SnapshotChunkManager {
  public:
   std::unique_ptr<SnapshotChunkManager> New(
-    Transport *transport_,
+    Transport &transport_,
     //std::function<void(pbMessageBatchUPtr)> &&onReceive, // Transport::handleRequest
     //std::function<void(uint64_t, uint64_t, uint64_t)> &&confirm, // Transport::handleSnapshotConfirm
     //std::function<uint64_t()> &&deploymentIDFunc, // Transport::deploymentID_
     std::function<std::string(uint64_t, uint64_t)> &&getSnapshotDir);
+
+  // AddChunk adds a received trunk to chunks
+  bool AddChunk(pbSnapshotChunkSPtr chunk);
+  void Tick();
  private:
-  SnapshotChunkManager();
+  SnapshotChunkManager(
+    Transport &transport_,
+    std::function<std::string(uint64_t, uint64_t)> &&getSnapshotDir);
+  std::shared_ptr<std::mutex> getSnapshotLock(const std::string &key);
+  bool onNewChunk(const std::string &key, pbSnapshotChunkSPtr chunk);
+
+  void gc();
+  void deleteTempChunkDir(const pbSnapshotChunk &chunk);
+  bool shouldUpdateValidator(const pbSnapshotChunk &chunk);
+
+
+  const uint64_t timeoutTick_;
+  const uint64_t gcTick_;
+  const uint64_t maxConcurrentSlot_;
 
   slogger log;
-  Transport *transport_;
-  uint64_t currentTick_;
+  Transport &transport_;
+  std::atomic_uint64_t currentTick_;
   bool validate_;
   std::function<std::string(uint64_t, uint64_t)> getSnapshotDir_;
   struct track {
@@ -44,12 +61,9 @@ class SnapshotChunkManager {
     uint64_t nextChunk;
     uint64_t tick;
   };
-  std::unordered_map<std::string, track> tracked_;
-  std::unordered_map<std::string, std::mutex> locks_;
-  uint64_t timeoutTick_;
-  uint64_t gcTick_;
-  uint64_t maxConcurrentSlot_;
   std::mutex mutex_;
+  std::unordered_map<std::string, std::shared_ptr<track>> tracked_; // guarded by mutex_
+  std::unordered_map<std::string, std::shared_ptr<std::mutex>> locks_; // guarded by mutex_
 };
 
 } // namespace transport
