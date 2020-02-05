@@ -79,7 +79,7 @@ void SnapshotEnv::createDir(const path &dir)
   create_directory(dir, ec);
   if (ec) {
     throw Error(ErrorCode::SnapshotEnvError,
-      "failed to create directory={0} with error_code={1}", dir, ec.message());
+      "failed to create directory={0} with error_code={1}", dir.c_str(), ec.message());
   }
   // fsync
 

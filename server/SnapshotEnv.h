@@ -8,7 +8,7 @@
 #include <stdint.h>
 #include <string>
 #include <functional>
-#include <boost/filesystem.hpp>
+#include "FileUtils.h"
 
 namespace ycrt
 {
