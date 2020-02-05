@@ -32,12 +32,11 @@ TEST(File, Fsync)
   boost::system::error_code ec;
   create_directory(dir, ec);
   boost::filesystem::fstream f(file, boost::filesystem::fstream::out);
-  f << "test";
-  
   ASSERT_TRUE(exists(dir));
   ASSERT_TRUE(exists(file));
-  int fd = ::open(file.c_str(), O_RDONLY);
-  int dd = ::open(dir.c_str(), O_RDONLY);
+  int fd = ::open(file.c_str(), O_RDWR);
+  int dd = ::open("", O_RDONLY);
+  ::write(fd, "abcd", 4);
   int ret1 = fsync(fd);
   f.sync();
   if (ret1 < 0) {
