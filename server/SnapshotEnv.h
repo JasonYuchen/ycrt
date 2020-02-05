@@ -29,19 +29,26 @@ class SnapshotEnv {
     uint64_t index,
     uint64_t from,
     Mode mode);
+  // FIXME: FinalizeSnapshot argument proto.Message ?
+  Status FinalizeSnapshot();
   const boost::filesystem::path &GetRootDir() const { return rootDir_; }
   const boost::filesystem::path &GetTempDir() const { return tmpDir_; }
   const boost::filesystem::path &GetFinalDir() const { return finalDir_; }
-  void RemoveTempDir() { remove(tmpDir_); }
-  void RemoveFinalDir() { remove(finalDir_); }
+  boost::filesystem::path GetFilePath() const;
+  boost::filesystem::path GetShrunkFilePath() const;
+  boost::filesystem::path GetTempFilePath() const;
+  Status CreateTempDir(bool must) { createDir(tmpDir_, must); }
+  Status RemoveTempDir(bool must) { removeDir(tmpDir_, must); }
+  Status RemoveFinalDir(bool must) { removeDir(finalDir_, must); }
  private:
-  void createDir(const boost::filesystem::path &dir);
-  void removeDir(const boost::filesystem::path &dir);
+  Status createDir(const boost::filesystem::path &dir, bool must);
+  Status removeDir(const boost::filesystem::path &dir, bool must);
+  static std::mutex finalizeLock_;
   uint64_t index_;
-  boost::filesystem::path rootDir_;
-  boost::filesystem::path tmpDir_;
-  boost::filesystem::path finalDir_;
-  boost::filesystem::path filePath_;
+  boost::filesystem::path rootDir_;  // specified by the upper layer, via SnapshotLocator
+  boost::filesystem::path tmpDir_;   // temp snapshot directory, child of rootDir_
+  boost::filesystem::path finalDir_; // final snapshot directory, child of rootDir
+  boost::filesystem::path filePath_; // snapshot file path
 };
 
 } // namespace server
