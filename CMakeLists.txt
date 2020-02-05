@@ -45,6 +45,7 @@ if (UnitTest)
             gtest_main
             spdlog
             protobuf
+            libboost_filesystem.a
             pthread)
     gtest_discover_tests(ycrt_test)
 endif ()
