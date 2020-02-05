@@ -29,10 +29,16 @@ class SnapshotEnv {
     uint64_t index,
     uint64_t from,
     Mode mode);
+  const boost::filesystem::path &GetRootDir() const { return rootDir_; }
+  const boost::filesystem::path &GetTempDir() const { return tmpDir_; }
+  const boost::filesystem::path &GetFinalDir() const { return finalDir_; }
+  void RemoveTempDir() { remove(tmpDir_); }
+  void RemoveFinalDir() { remove(finalDir_); }
  private:
+  void createDir(const boost::filesystem::path &dir);
+  void removeDir(const boost::filesystem::path &dir);
   uint64_t index_;
   boost::filesystem::path rootDir_;
-  //std::string rootDir_;
   boost::filesystem::path tmpDir_;
   boost::filesystem::path finalDir_;
   boost::filesystem::path filePath_;

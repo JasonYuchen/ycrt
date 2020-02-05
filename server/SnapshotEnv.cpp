@@ -3,6 +3,7 @@
 //
 
 #include <spdlog/formatter.h>
+#include "utils/Error.h"
 #include "SnapshotEnv.h"
 
 namespace ycrt
@@ -13,6 +14,7 @@ namespace server
 
 using namespace std;
 using namespace boost::filesystem;
+using boost::system::error_code;
 
 static const char *fileSuffix = "snap";
 static const char *genTmpDirSuffix = "generating";
@@ -37,6 +39,21 @@ static path getTmpDir(
   return rootDir / fmt::format("snapshot-{0:016X}-{1}.{2}", index, from, suffix);
 }
 
+static path getFinalDir(const path &rootDir, uint64_t index)
+{
+  return rootDir / fmt::format("snapshot-{0:016X}", index);
+}
+
+static path getFileName(uint64_t index)
+{
+  return fmt::format("snapshot-{0:016X}.{1}", index, fileSuffix);
+}
+
+static path getShrunkFileName(uint64_t index)
+{
+  return fmt::format("snapshot-{0:016X}.{1}", index, shrunkSuffix);
+}
+
 SnapshotEnv::SnapshotEnv(
   SnapshotLocator &locator,
   uint64_t clusterID,
@@ -47,9 +64,30 @@ SnapshotEnv::SnapshotEnv(
   : index_(index),
     rootDir_(locator(clusterID, nodeID)),
     tmpDir_(getTmpDir(rootDir_, getSuffix(mode), index, from)),
-    finalDir_(),
-    filePath_()
+    finalDir_(getFinalDir(rootDir_, index)),
+    filePath_(finalDir_ / getFileName(index))
 {
+}
+
+void SnapshotEnv::createDir(const path &dir)
+{
+  // FIXME: dir must be the direct child of rootDir
+  //  if (dir.parent_path() != rootDir_) {
+  //    throw Error();
+  //  }
+  error_code ec;
+  create_directory(dir, ec);
+  if (ec) {
+    throw Error(ErrorCode::SnapshotEnvError,
+      "failed to create directory={0} with error_code={1}", dir, ec.message());
+  }
+  // fsync
+
+}
+
+void SnapshotEnv::removeDir(const path &dir)
+{
+  // dir must be the direct child of rootDir
 }
 
 } // namespace server

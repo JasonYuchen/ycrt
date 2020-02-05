@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include "utils/Utils.h"
 #include "pb/RaftMessage.h"
+#include "server/SnapshotEnv.h"
 
 namespace ycrt
 {
@@ -28,7 +29,7 @@ class SnapshotChunkManager {
     //std::function<void(pbMessageBatchUPtr)> &&onReceive, // Transport::handleRequest
     //std::function<void(uint64_t, uint64_t, uint64_t)> &&confirm, // Transport::handleSnapshotConfirm
     //std::function<uint64_t()> &&deploymentIDFunc, // Transport::deploymentID_
-    std::function<std::string(uint64_t, uint64_t)> &&getSnapshotDir);
+    server::SnapshotLocator &&getSnapshotDir);
 
   // AddChunk adds a received trunk to chunks
   bool AddChunk(pbSnapshotChunkSPtr chunk);
