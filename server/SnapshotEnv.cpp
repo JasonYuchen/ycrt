@@ -16,6 +16,8 @@ using namespace std;
 using namespace boost::filesystem;
 using boost::system::error_code;
 
+static const char *snapshotFlagFile = "snapshot.message";
+static const char *snapshotMetadataFlagFile = "snapshot.metadata";
 static const char *fileSuffix = "snap";
 static const char *genTmpDirSuffix = "generating";
 static const char *recvTmpDirSuffix = "receiving";
@@ -69,21 +71,6 @@ SnapshotEnv::SnapshotEnv(
 {
 }
 
-Status SnapshotEnv::FinalizeSnapshot()
-{
-  lock_guard<mutex> guard(finalizeLock_);
-  // FIXME: flag file?
-  if (exists(finalDir_)) {
-    return ErrorCode::SnapshotOutOfDate;
-  }
-  error_code ec;
-  rename(tmpDir_, finalDir_, ec);
-  if (ec) {
-    return ErrorCode::SnapshotEnvError;
-  }
-  return SyncDir(rootDir_);
-}
-
 path SnapshotEnv::GetFilePath() const
 {
   return finalDir_ / getFileName(index_);
@@ -97,6 +84,43 @@ path SnapshotEnv::GetShrunkFilePath() const
 path SnapshotEnv::GetTempFilePath() const
 {
   return tmpDir_ / getFileName(index_);
+}
+
+Status SnapshotEnv::SaveSnapshotMetadata(string_view metadata)
+{
+  return CreateFlagFile(tmpDir_ / snapshotMetadataFlagFile, metadata);
+}
+
+bool SnapshotEnv::HasFlagFile()
+{
+  error_code ec;
+  bool existing = exists(finalDir_ / snapshotFlagFile, ec);
+  return existing;
+}
+
+Status SnapshotEnv::RemoveFlagFile()
+{
+  return ycrt::RemoveFlagFile(finalDir_ / snapshotFlagFile);
+}
+
+Status SnapshotEnv::FinalizeSnapshot(string_view snapshotMsgRaw)
+{
+  lock_guard<mutex> guard(finalizeLock_);
+  Status s = CreateFlagFile(tmpDir_ / snapshotFlagFile, snapshotMsgRaw);
+  if (!s.IsOK()) {
+    return s;
+  }
+  // FIXME: check ec?
+  error_code ec;
+  bool finalExisting = exists(finalDir_, ec);
+  if (finalExisting) {
+    return ErrorCode::SnapshotOutOfDate;
+  }
+  rename(tmpDir_, finalDir_, ec);
+  if (ec) {
+    return ErrorCode::SnapshotEnvError;
+  }
+  return SyncDir(rootDir_);
 }
 
 Status SnapshotEnv::createDir(const path &dir, bool must)
@@ -115,7 +139,7 @@ Status SnapshotEnv::createDir(const path &dir, bool must)
     }
     return ErrorCode::SnapshotEnvError;
   }
-  return SyncDir(dir);
+  return SyncDir(rootDir_); //dir must be the direct child of rootDir
 }
 
 Status SnapshotEnv::removeDir(const path &dir, bool must)
@@ -125,8 +149,8 @@ Status SnapshotEnv::removeDir(const path &dir, bool must)
   //    throw Error();
   //  }
   error_code ec;
-  bool done = remove(dir, ec);
-  if (!done || ec) {
+  remove_all(dir, ec);
+  if (ec) {
     if (must) {
       throw Error(ErrorCode::SnapshotEnvError,
         "failed to remove directory={0} with error={1}",
@@ -134,7 +158,7 @@ Status SnapshotEnv::removeDir(const path &dir, bool must)
     }
     return ErrorCode::SnapshotEnvError;
   }
-  return SyncDir(dir);
+  return SyncDir(rootDir_); //dir must be the direct child of rootDir
 }
 
 std::mutex SnapshotEnv::finalizeLock_;

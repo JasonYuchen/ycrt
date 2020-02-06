@@ -29,20 +29,48 @@ class SnapshotEnv {
     uint64_t index,
     uint64_t from,
     Mode mode);
-  // FIXME: FinalizeSnapshot argument proto.Message ?
-  Status FinalizeSnapshot();
+
+  // GetRootDir returns the root directory. The temp and final snapshot
+  // directories are children of the root directory.
   const boost::filesystem::path &GetRootDir() const { return rootDir_; }
+
+  // GetTempDir returns the temp snapshot directory.
   const boost::filesystem::path &GetTempDir() const { return tmpDir_; }
+
+  // GetFinalDir returns the final snapshot directory.
   const boost::filesystem::path &GetFinalDir() const { return finalDir_; }
+
+  // GetFilePath returns the snapshot file path.
   boost::filesystem::path GetFilePath() const;
+
+  // GetShrunkFilePath returns the file path of the shrunk snapshot.
   boost::filesystem::path GetShrunkFilePath() const;
+
+  // GetTempFilePath returns the temp snapshot file path.
   boost::filesystem::path GetTempFilePath() const;
-  Status CreateTempDir(bool must) { return createDir(tmpDir_, must); }
+
+  // CreateTempDir creates the temp snapshot directory.
+  Status CreateTempDir() { return createDir(tmpDir_, false); }
+
+  // RemoveTempDir removes the temp snapshot directory.
   Status RemoveTempDir(bool must) { return removeDir(tmpDir_, must); }
+
+  // RemoveFinalDir removes the final snapshot directory.
   Status RemoveFinalDir(bool must) { return removeDir(finalDir_, must); }
+
+  // SaveSnapshotMetadata saves the metadata of the snapshot file.
+  Status SaveSnapshotMetadata(string_view metadata);
+
+  bool HasFlagFile();
+  Status RemoveFlagFile();
+
+  // FinalizeSnapshot finalizes the snapshot.
+  // FIXME: FinalizeSnapshot argument proto.Message ?
+  Status FinalizeSnapshot(string_view snapshotMsgRaw);
  private:
   Status createDir(const boost::filesystem::path &dir, bool must);
   Status removeDir(const boost::filesystem::path &dir, bool must);
+
   static std::mutex finalizeLock_;
   uint64_t index_;
   boost::filesystem::path rootDir_;  // specified by the upper layer, via SnapshotLocator
