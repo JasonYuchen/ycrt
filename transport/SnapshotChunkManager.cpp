@@ -24,10 +24,10 @@ static string GetSnapshotKey(const pbSnapshotChunk &chunk)
 
 unique_ptr<SnapshotChunkManager> SnapshotChunkManager::New(
   Transport &transport,
-  function<string(uint64_t, uint64_t)> &&getSnapshotDir)
+  function<string(uint64_t, uint64_t)> &&locator)
 {
   unique_ptr<SnapshotChunkManager> manager(
-    new SnapshotChunkManager(transport, std::move(getSnapshotDir)));
+    new SnapshotChunkManager(transport, std::move(locator)));
   return manager;
 }
 
@@ -43,14 +43,20 @@ bool SnapshotChunkManager::AddChunk(pbSnapshotChunkSPtr chunk)
   string snapshotKey = GetSnapshotKey(*chunk);
   shared_ptr<mutex> snapshotLock = getSnapshotLock(snapshotKey);
   lock_guard<mutex> snapshotGuard(*snapshotLock);
-  if(!onNewChunk(snapshotKey, chunk)) {
+  shared_ptr<track> t = onNewChunk(snapshotKey, chunk);
+  if (!t) {
     return false;
   }
-  shared_ptr<track> t = tracked_[snapshotKey];
   if (shouldUpdateValidator(*chunk)) {
     // FIXME: validator
   }
-  // TODO:
+  if (nodeRemoved(*chunk)) {
+    deleteTempChunkDir(*chunk);
+    log->warn("SnapshotChunkManager::AddChunk: "
+              "node removed, ignored chunk, key={0}", snapshotKey);
+    return false;
+  }
+  // TODO
 }
 
 void SnapshotChunkManager::Tick()
@@ -63,7 +69,7 @@ void SnapshotChunkManager::Tick()
 
 SnapshotChunkManager::SnapshotChunkManager(
   Transport &transport_,
-  function<string(uint64_t, uint64_t)> &&getSnapshotDir)
+  function<string(uint64_t, uint64_t)> &&locator)
   : timeoutTick_(Soft::ins().SnapshotChunkTimeoutTick),
     gcTick_(Soft::ins().SnapshotGCTick),
     maxConcurrentSlot_(Soft::ins().MaxConcurrentStreamingSnapshot),
@@ -71,7 +77,7 @@ SnapshotChunkManager::SnapshotChunkManager(
     transport_(transport_),
     currentTick_(0),
     validate_(true),
-    getSnapshotDir_(std::move(getSnapshotDir)),
+    snapshotLocator_(std::move(locator)),
     mutex_(),
     tracked_(),
     locks_()
@@ -88,7 +94,7 @@ shared_ptr<mutex> SnapshotChunkManager::getSnapshotLock(
   return locks_[snapshotKey];
 }
 
-bool SnapshotChunkManager::onNewChunk(
+shared_ptr<SnapshotChunkManager::track> SnapshotChunkManager::onNewChunk(
   const string &key,
   pbSnapshotChunkSPtr chunk)
 {
@@ -103,7 +109,7 @@ bool SnapshotChunkManager::onNewChunk(
     }
     if (tracked_.size() >= maxConcurrentSlot_) {
       log->error("max slot count reached, dropped a chunk, key={0}", key);
-      return false;
+      return nullptr;
     }
     // FIXME: auto validator = rsm.NewSnapshotValidator()
     //  if (validate && !chunk->HasFileInfo) {
@@ -120,17 +126,17 @@ bool SnapshotChunkManager::onNewChunk(
     if (t == tracked_.end()) {
       log->warn("ignored a not tracked chunk, key={0}, id={1}",
         key, chunk->chunk_id());
-      return false;
+      return nullptr;
     }
     if (t->second->nextChunk != chunk->chunk_id()) {
       log->warn("ignored an out of order chunk, key={0}, id={1}, expected={2}",
         key, chunk->chunk_id(), t->second->nextChunk);
-      return false;
+      return nullptr;
     }
     if (t->second->firstChunk->from() != chunk->from()) {
       log->warn("ignored a chunk, key={0}, from={1}, expected={2}",
         key, chunk->from(), t->second->firstChunk->from());
-      return false;
+      return nullptr;
     }
     t->second->nextChunk = chunk->chunk_id() + 1;
   }
@@ -139,7 +145,7 @@ bool SnapshotChunkManager::onNewChunk(
       make_shared<pbSnapshotFile>(chunk->file_info()));
   }
   t->second->tick = currentTick_;
-  return true;
+  return t->second;
 }
 
 void SnapshotChunkManager::gc()
@@ -158,12 +164,39 @@ void SnapshotChunkManager::gc()
 
 void SnapshotChunkManager::deleteTempChunkDir(const pbSnapshotChunk &chunk)
 {
-  // TODO
+  getSnapshotEnv(chunk).RemoveTempDir(true);
 }
 
 bool SnapshotChunkManager::shouldUpdateValidator(const pbSnapshotChunk &chunk)
 {
   // TODO
+}
+
+bool SnapshotChunkManager::nodeRemoved(const pbSnapshotChunk &chunk)
+{
+  return IsDirMarkedAsDeleted(getSnapshotEnv(chunk).GetRootDir()).GetOrThrow();
+}
+
+Status SnapshotChunkManager::saveChunk(const pbSnapshotChunk &chunk)
+{
+  server::SnapshotEnv env = getSnapshotEnv(chunk);
+  if (chunk.chunk_id() == 0) {
+    Status s = env.CreateTempDir();
+    if (!s.IsOK()){
+      return s;
+    }
+  }
+  // TODO
+}
+
+server::SnapshotEnv SnapshotChunkManager::getSnapshotEnv(
+  const pbSnapshotChunk &chunk)
+{
+  return server::SnapshotEnv(
+    snapshotLocator_(chunk.cluster_id(), chunk.node_id()),
+    chunk.index(),
+    chunk.from(),
+    server::SnapshotEnv::Receiving);
 }
 
 } // namespace transport

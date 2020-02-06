@@ -16,19 +16,14 @@ namespace ycrt
 namespace server
 {
 
-// dir SnapshotLocator(clusterID, nodeID)
+// root SnapshotLocator(clusterID, nodeID)
 using SnapshotLocator = std::function<std::string(uint64_t, uint64_t)>;
 
 class SnapshotEnv {
  public:
   enum Mode { Snapshotting, Receiving };
-  SnapshotEnv(
-    SnapshotLocator &locator,
-    uint64_t clusterID,
-    uint64_t nodeID,
-    uint64_t index,
-    uint64_t from,
-    Mode mode);
+  // root = SnapshotLocator(clusterID, nodeID)
+  SnapshotEnv(const std::string &root, uint64_t index, uint64_t from, Mode mode);
 
   // GetRootDir returns the root directory. The temp and final snapshot
   // directories are children of the root directory.

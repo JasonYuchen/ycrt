@@ -57,14 +57,12 @@ static path getShrunkFileName(uint64_t index)
 }
 
 SnapshotEnv::SnapshotEnv(
-  SnapshotLocator &locator,
-  uint64_t clusterID,
-  uint64_t nodeID,
+  const string &root,
   uint64_t index,
   uint64_t from,
   Mode mode)
   : index_(index),
-    rootDir_(locator(clusterID, nodeID)),
+    rootDir_(root),
     tmpDir_(getTmpDir(rootDir_, getSuffix(mode), index, from)),
     finalDir_(getFinalDir(rootDir_, index)),
     filePath_(finalDir_ / getFileName(index))
