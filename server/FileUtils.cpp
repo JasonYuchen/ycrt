@@ -15,7 +15,7 @@ using namespace std;
 using namespace boost::filesystem;
 using boost::system::error_code;
 
-static const char *deletedFileFlag = "DELETED";
+static const char *deletedFlagFile = "DELETED";
 
 static void logErrno(const char *desc)
 {
@@ -67,13 +67,13 @@ Status SyncDir(const path &dir)
 
 Status MarkDirAsDeleted(const path &dir, string_view content)
 {
-  return CreateFlagFile(dir / deletedFileFlag, content);
+  return CreateFlagFile(dir / deletedFlagFile, content);
 }
 
 StatusWith<bool> IsDirMarkedAsDeleted(const path &dir)
 {
   error_code ec;
-  bool existing = exists(dir / deletedFileFlag, ec);
+  bool existing = exists(dir / deletedFlagFile, ec);
   if (ec) {
     return ErrorCode::FileSystem;
   } else {
@@ -85,33 +85,66 @@ StatusWith<bool> IsDirMarkedAsDeleted(const path &dir)
 // TODO: use C functions
 Status CreateFlagFile(const path &filePath, string_view content)
 {
-//  {
-//    fstream f(filePath, fstream::out | fstream::binary);
-//    if (!f) {
-//      logErrno("CreateFlagFile fstream");
-//      return ErrorCode::FileSystem;
-//    }
-//    f << content.size() << content;
-//    //Sync(f);
-//  }
-//  return SyncDir(filePath.parent_path());
+  int fd = ::open(filePath.c_str(), O_RDWR | O_CREAT | O_TRUNC | O_CLOEXEC);
+  if (fd < 0) {
+    logErrno("CreateFlagFile open");
+    return ErrorCode::FileSystem;
+  }
+  size_t len = content.size();
+  size_t size = ::write(fd, &len, sizeof(size_t));
+  if (size != sizeof(size_t)) {
+    ::close(fd);
+    return ErrorCode::FileSystem;
+  }
+  size = ::write(fd, content.data(), len);
+  if (size != len) {
+    ::close(fd);
+    return ErrorCode::FileSystem;
+  }
+  if (::fsync(fd) < 0) {
+    logErrno("CreateFlagFile fsync");
+    ::close(fd);
+    return ErrorCode::FileSystem;
+  }
+  if (::close(fd) < 0) {
+    logErrno("CreateFlagFile close");
+    return ErrorCode::FileSystem;
+  }
+  return ErrorCode::OK;
+}
+
+Status RemoveFlagFile(const path &filePath)
+{
+  error_code ec;
+  bool done = remove(filePath, ec);
+  if (!done || ec) {
+    return ErrorCode::FileSystem;
+  }
+  return ErrorCode::OK;
 }
 
 // TODO: use C functions
 StatusWith<string> GetFlagFileContent(const path &filePath)
 {
-//  fstream f(filePath, fstream::in | fstream::binary);
-//  if (!f) {
-//    logErrno("GetFlagFileContent fstream");
-//    return ErrorCode::FileSystem;
-//  }
-//  size_t len;
-//  f >> len;
-//  string content((istream_iterator<char>(f)), istream_iterator<char>());
-//  if (content.size() != len) {
-//    return ErrorCode::FileSystem;
-//  }
-//  return content;
+  int fd = ::open(filePath.c_str(), O_RDONLY | O_CLOEXEC);
+  if (fd < 0) {
+    logErrno("GetFlagFileContent open");
+    return ErrorCode::FileSystem;
+  }
+  size_t len;
+  std::string result;
+  size_t size = ::read(fd, &len, sizeof(size_t));
+  if (size != sizeof(size_t)) {
+    ::close(fd);
+    return ErrorCode::FileSystem;
+  }
+  result.resize(len);
+  size = ::read(fd, const_cast<char*>(result.data()), len);
+  if (size != len) {
+    ::close(fd);
+    return ErrorCode::FileSystem;
+  }
+  return result;
 }
 
 } // namespace ycrt

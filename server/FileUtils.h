@@ -22,10 +22,18 @@ Status MarkDirAsDeleted(const boost::filesystem::path &dir, string_view content)
 // directory has been marked as deleted.
 StatusWith<bool> IsDirMarkedAsDeleted(const boost::filesystem::path &dir);
 
+// CreateFlagFile creates a flag file in the specific location. The flag file
+// contains the marshaled data of the specified protobuf message.
 Status CreateFlagFile(
   const boost::filesystem::path &filePath,
   string_view content);
 
+// RemoveFlagFile removes the specified flag file.
+Status RemoveFlagFile(const boost::filesystem::path &filePath);
+
+// GetFlagFileContent gets the content of the flag file found in the specified
+// location. The data of the flag file will be unmarshaled into the specified
+// protobuf message.
 StatusWith<std::string> GetFlagFileContent(const boost::filesystem::path &filePath);
 
 } // namespace ycrt
