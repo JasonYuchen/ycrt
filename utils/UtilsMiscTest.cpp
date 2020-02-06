@@ -51,3 +51,12 @@ TEST(File, Fsync)
     ::close(dd);
   }
 }
+
+TEST(File, Read)
+{
+  boost::filesystem::path dir("abc");
+  boost::filesystem::path file(dir / "text.txt");
+  Status s = CreateFlagFile(file, "testcount");
+  string content = std::move(GetFlagFileContent(file).GetMutableOrThrow());
+  ASSERT_TRUE(s.IsOK());
+}
