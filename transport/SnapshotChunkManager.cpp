@@ -50,7 +50,7 @@ bool SnapshotChunkManager::AddChunk(pbSnapshotChunkSPtr chunk)
   if (shouldUpdateValidator(*chunk)) {
     // FIXME: validator
   }
-
+  // TODO:
 }
 
 void SnapshotChunkManager::Tick()

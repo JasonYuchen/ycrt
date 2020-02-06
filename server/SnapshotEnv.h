@@ -37,9 +37,9 @@ class SnapshotEnv {
   boost::filesystem::path GetFilePath() const;
   boost::filesystem::path GetShrunkFilePath() const;
   boost::filesystem::path GetTempFilePath() const;
-  Status CreateTempDir(bool must) { createDir(tmpDir_, must); }
-  Status RemoveTempDir(bool must) { removeDir(tmpDir_, must); }
-  Status RemoveFinalDir(bool must) { removeDir(finalDir_, must); }
+  Status CreateTempDir(bool must) { return createDir(tmpDir_, must); }
+  Status RemoveTempDir(bool must) { return removeDir(tmpDir_, must); }
+  Status RemoveFinalDir(bool must) { return removeDir(finalDir_, must); }
  private:
   Status createDir(const boost::filesystem::path &dir, bool must);
   Status removeDir(const boost::filesystem::path &dir, bool must);
