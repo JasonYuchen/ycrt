@@ -12,6 +12,9 @@
 namespace ycrt
 {
 
+// SyncDir calls fsync on the specified fd.
+Status SyncFd(int fd);
+
 // SyncDir calls fsync on the specified directory.
 Status SyncDir(const boost::filesystem::path &dir);
 

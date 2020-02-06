@@ -17,9 +17,16 @@ using boost::system::error_code;
 
 static const char *deletedFlagFile = "DELETED";
 
-static void logErrno(const char *desc)
+//void logErrno(const char *desc)
+//{
+//  Log.GetLogger("server")->error("{0}: {1}", desc, strerror(errno));
+//}
+
+Status SyncFd(int fd)
 {
-  Log.GetLogger("server")->error("{0}: {1}", desc, strerror(errno));
+  if (::fsync(fd) < 0) {
+    return ErrorCode::FileSystem;
+  }
 }
 
 Status SyncDir(const path &dir)
@@ -27,16 +34,13 @@ Status SyncDir(const path &dir)
   // FIXME: check the error
   int fd = ::open(dir.c_str(), O_RDONLY);
   if (fd < 0) {
-    logErrno("SyncDir open");
     return ErrorCode::FileSystem;
   }
   if (::fsync(fd) < 0) {
     ::close(fd);
-    logErrno("SyncDir fsync");
     return ErrorCode::FileSystem;
   }
   if (::close(fd) < 0) {
-    logErrno("SyncDir close");
     return ErrorCode::FileSystem;
   }
   return ErrorCode::OK;
@@ -87,7 +91,6 @@ Status CreateFlagFile(const path &filePath, string_view content)
 {
   int fd = ::open(filePath.c_str(), O_RDWR | O_CREAT | O_TRUNC | O_CLOEXEC);
   if (fd < 0) {
-    logErrno("CreateFlagFile open");
     return ErrorCode::FileSystem;
   }
   size_t len = content.size();
@@ -102,12 +105,10 @@ Status CreateFlagFile(const path &filePath, string_view content)
     return ErrorCode::FileSystem;
   }
   if (::fsync(fd) < 0) {
-    logErrno("CreateFlagFile fsync");
     ::close(fd);
     return ErrorCode::FileSystem;
   }
   if (::close(fd) < 0) {
-    logErrno("CreateFlagFile close");
     return ErrorCode::FileSystem;
   }
   return ErrorCode::OK;
@@ -128,7 +129,6 @@ StatusWith<string> GetFlagFileContent(const path &filePath)
 {
   int fd = ::open(filePath.c_str(), O_RDONLY | O_CLOEXEC);
   if (fd < 0) {
-    logErrno("GetFlagFileContent open");
     return ErrorCode::FileSystem;
   }
   size_t len;
