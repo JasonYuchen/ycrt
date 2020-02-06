@@ -84,8 +84,10 @@ inline bool operator==(const Status &lhs, ErrorCode rhs)
 template<typename Result>
 class StatusWith {
  public:
-  StatusWith(const Result &r) : result_(r), error_(ErrorCode::OK) {}
-  StatusWith(Result &&r) : result_(std::move(r)), error_(ErrorCode::OK) {}
+  StatusWith(const Result &r, ErrorCode error = ErrorCode::OK)
+    : result_(r), error_(error) {}
+  StatusWith(Result &&r, ErrorCode error = ErrorCode::OK)
+    : result_(std::move(r)), error_(error) {}
   StatusWith(ErrorCode error) : result_(), error_(error) {}
   StatusWith(const Status &s) : result_(), error_(s.Code()) {}
   StatusWith(Status &&s) : result_(), error_(s.Code()) {}
