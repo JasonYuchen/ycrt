@@ -48,33 +48,42 @@ SnapshotChunkFile::SnapshotChunkFile(int fd, bool syncDir, path dir)
 
 StatusWith<uint64_t> SnapshotChunkFile::Read(std::string &buf)
 {
-  size_t size = ::read(fd_, const_cast<char*>(buf.data()), buf.size());
-  if (size != buf.size()) {
-    return {size, ErrorCode::FileSystem};
+  int size = ::read(fd_, const_cast<char*>(buf.data()), buf.size());
+  if (size < 0) {
+    return {0, ErrorCode::FileSystem};
   }
-  return size;
+  if (uint64_t(size) < buf.size()) {
+    return {uint64_t(size), ErrorCode::ShortRead};
+  }
+  return uint64_t(size);
 }
 
 StatusWith<uint64_t> SnapshotChunkFile::ReadAt(std::string &buf, int64_t offset)
 {
-  size_t size = ::lseek(fd_, offset, SEEK_SET);
+  int size = ::lseek(fd_, offset, SEEK_SET);
   if (size < 0) {
     return ErrorCode::FileSystem;
   }
   size = ::read(fd_, const_cast<char*>(buf.data()), buf.size());
-  if (size != buf.size()) {
-    return {size, ErrorCode::FileSystem};
+  if (size < 0) {
+    return {0, ErrorCode::FileSystem};
   }
-  return size;
+  if (uint64_t(size) < buf.size()) {
+    return {uint64_t(size), ErrorCode::ShortRead};
+  }
+  return uint64_t(size);
 }
 
 StatusWith<uint64_t> SnapshotChunkFile::Write(const std::string &buf)
 {
-  size_t size = ::write(fd_, buf.data(), buf.size());
-  if (size != buf.size()) {
-    return {size, ErrorCode::FileSystem};
+  int size = ::write(fd_, buf.data(), buf.size());
+  if (size < 0) {
+    return {0, ErrorCode::FileSystem};
   }
-  return size;
+  if (uint64_t(size) < buf.size()) {
+    return {uint64_t(size), ErrorCode::ShortWrite};
+  }
+  return uint64_t(size);
 }
 
 Status SnapshotChunkFile::Sync()
@@ -112,7 +121,7 @@ unique_ptr<SnapshotChunkManager> SnapshotChunkManager::New(
 
 bool SnapshotChunkManager::AddChunk(pbSnapshotChunkSPtr chunk)
 {
-  // FIXME: check BinVer
+  // TODO: check BinVer
   if (chunk->deployment_id() != transport_.GetDeploymentID()) {
     log->error("SnapshotChunkManager::AddChunk: invalid deploymentID, "
                "expected={0}, actual={1}",
@@ -123,19 +132,51 @@ bool SnapshotChunkManager::AddChunk(pbSnapshotChunkSPtr chunk)
   shared_ptr<mutex> snapshotLock = getSnapshotLock(snapshotKey);
   lock_guard<mutex> snapshotGuard(*snapshotLock);
   shared_ptr<track> t = onNewChunk(snapshotKey, chunk);
+  // FIXME: consider try {} catch {} ...
   if (!t) {
     return false;
   }
   if (shouldUpdateValidator(*chunk)) {
-    // FIXME: validator
+    // TODO: validator
   }
-  if (nodeRemoved(*chunk)) {
+  bool removed = nodeRemoved(*chunk).GetOrThrow();
+  if (removed) {
     deleteTempChunkDir(*chunk);
     log->warn("SnapshotChunkManager::AddChunk: "
               "node removed, ignored chunk, key={0}", snapshotKey);
     return false;
   }
-  // TODO
+  Status saved = saveChunk(*chunk);
+  if (!saved.IsOK()) {
+    deleteTempChunkDir(*chunk);
+    throw Error(saved.Code(), log,
+      "SnapshotChunkManager::AddChunk: "
+      "failed to save a chunk, key={0}", snapshotKey);
+  }
+  if (chunk->chunk_id() + 1 == chunk->chunk_count()) {
+    log->info("last chunk received, key={0}", snapshotKey);
+    deleteTrack(snapshotKey); // it is ok to remove tracked_[key] because we hold a sp to current track
+    if (validate_) {
+      // TODO: validator
+    }
+    pbMessageBatchUPtr snapshotMsg = toMessageBatch(*chunk, t->extraFiles);
+    Status finalized = finalizeSnapshot(*chunk, *snapshotMsg);
+    if (!finalized.IsOK()) {
+      deleteTempChunkDir(*chunk);
+      if (finalized.Code() != ErrorCode::SnapshotOutOfDate) {
+        throw Error(finalized.Code(), log,
+          "SnapshotChunkManager::AddChunk:"
+          "failed to finalize a chunk, key={0}", snapshotKey);
+      }
+      return false;
+    }
+    log->info("{0} received snapshot from {1}, index={2}, term={3}",
+      FmtClusterNode(chunk->cluster_id(), chunk->node_id()),
+      chunk->from(), chunk->index(), chunk->term());
+    transport_.HandleRequest(std::move(snapshotMsg));
+    transport_.HandleSnapshotConfirm(
+      chunk->cluster_id(), chunk->node_id(), chunk->from());
+  }
   return true;
 }
 
@@ -242,6 +283,12 @@ void SnapshotChunkManager::gc()
   }
 }
 
+void SnapshotChunkManager::deleteTrack(const string &key)
+{
+  lock_guard<mutex> guard(mutex_);
+  tracked_.erase(key);
+}
+
 void SnapshotChunkManager::deleteTempChunkDir(const pbSnapshotChunk &chunk)
 {
   getSnapshotEnv(chunk).RemoveTempDir(true);
@@ -249,18 +296,17 @@ void SnapshotChunkManager::deleteTempChunkDir(const pbSnapshotChunk &chunk)
 
 bool SnapshotChunkManager::shouldUpdateValidator(const pbSnapshotChunk &chunk)
 {
-  // TODO
-  return false;
+  return validate_ && !chunk.has_file_info() && chunk.chunk_id() != 0;
 }
 
-bool SnapshotChunkManager::nodeRemoved(const pbSnapshotChunk &chunk)
+StatusWith<bool> SnapshotChunkManager::nodeRemoved(const pbSnapshotChunk &chunk)
 {
-  return IsDirMarkedAsDeleted(getSnapshotEnv(chunk).GetRootDir()).GetOrThrow();
+  return IsDirMarkedAsDeleted(getSnapshotEnv(chunk).GetRootDir());
 }
 
 Status SnapshotChunkManager::saveChunk(const pbSnapshotChunk &chunk)
 {
-  server::SnapshotEnv env = getSnapshotEnv(chunk);
+  auto env = getSnapshotEnv(chunk);
   if (chunk.chunk_id() == 0) {
     Status s = env.CreateTempDir();
     if (!s.IsOK()){
@@ -268,9 +314,32 @@ Status SnapshotChunkManager::saveChunk(const pbSnapshotChunk &chunk)
     }
   }
   auto filename = path(chunk.filepath()).filename();
-  auto file = env.GetTempDir() / filename;
-  // TODO
+  auto filepath = env.GetTempDir() / filename;
+  auto mode = chunk.file_chunk_id() == 0 ?
+    SnapshotChunkFile::CREATE : SnapshotChunkFile::APPEND;
+  SnapshotChunkFile file = SnapshotChunkFile::Open(filepath, mode);
+  StatusWith<uint64_t> size = file.Write(chunk.data());
+  if (!size.IsOK()) {
+    return size.Code();
+  }
+  // FIXME: add methods IsLastChunk(), IsLastFileChunk() to class pbSnapshotChunk
+  if (chunk.chunk_id() + 1== chunk.chunk_count() ||
+    chunk.file_chunk_id() + 1 == chunk.file_chunk_count()) {
+    return file.Sync();
+  }
   return ErrorCode::OK;
+}
+
+Status SnapshotChunkManager::finalizeSnapshot(
+  const pbSnapshotChunk &chunk,
+  const pbMessageBatch &msg)
+{
+  auto env = getSnapshotEnv(chunk);
+  string data;
+  if (msg.requests(0).SerializeToString(&data)) {
+    throw Error(ErrorCode::Other, "should not reach here");
+  }
+  return env.FinalizeSnapshot(data);
 }
 
 server::SnapshotEnv SnapshotChunkManager::getSnapshotEnv(
@@ -281,6 +350,36 @@ server::SnapshotEnv SnapshotChunkManager::getSnapshotEnv(
     chunk.index(),
     chunk.from(),
     server::SnapshotEnv::Receiving);
+}
+
+pbMessageBatchUPtr SnapshotChunkManager::toMessageBatch(
+  const pbSnapshotChunk &chunk,
+  const vector<pbSnapshotFileSPtr> &files)
+{
+  // FIXME:
+  auto env = getSnapshotEnv(chunk);
+  auto m = make_unique<pbMessageBatch>();
+  m->set_bin_ver(chunk.bin_ver());
+  m->set_deployment_id(chunk.deployment_id());
+  auto msg = m->add_requests();
+  msg->set_type(raftpb::InstallSnapshot);
+  msg->set_from(chunk.from());
+  msg->set_to(chunk.node_id());
+  msg->set_cluster_id(chunk.cluster_id());
+  msg->set_allocated_snapshot(new pbSnapshot());
+  msg->mutable_snapshot()->set_index(chunk.index());
+  msg->mutable_snapshot()->set_term(chunk.term());
+  msg->mutable_snapshot()->set_on_disk_index(chunk.on_disk_index());
+  msg->mutable_snapshot()->set_allocated_membership(new pbMembership(chunk.membership()));
+  msg->mutable_snapshot()->set_filepath((env.GetFinalDir() / path(chunk.filepath()).filename()).string());
+  msg->mutable_snapshot()->set_file_size(chunk.file_size());
+  msg->mutable_snapshot()->set_witness(chunk.witness());
+  for (auto &file : files) {
+    auto *tmp = new pbSnapshotFile(*file);
+    tmp->set_file_path((env.GetFinalDir() / fmt::format("external-file-{0}", file->file_id())).string());
+    msg->mutable_snapshot()->mutable_files()->AddAllocated(tmp);
+  }
+  return m;
 }
 
 } // namespace transport

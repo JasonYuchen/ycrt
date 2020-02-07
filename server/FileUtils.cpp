@@ -27,6 +27,7 @@ Status SyncFd(int fd)
   if (::fsync(fd) < 0) {
     return ErrorCode::FileSystem;
   }
+  return ErrorCode::OK;
 }
 
 Status SyncDir(const path &dir)

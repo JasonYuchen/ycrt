@@ -21,6 +21,9 @@ namespace ycrt
 namespace transport
 {
 
+// {snapshot} - split, send (managed by Transport) ->
+// {chunk1 chunk2 ...} - receive, merge (managed by SnapshotChunkFile) ->
+// {snapshot}
 class SnapshotChunkFile {
  public:
   enum Mode { CREATE, READ, APPEND };
@@ -40,7 +43,7 @@ class SnapshotChunkFile {
 class Transport;
 class SnapshotChunkManager {
  public:
-  std::unique_ptr<SnapshotChunkManager> New(
+  static std::unique_ptr<SnapshotChunkManager> New(
     Transport &transport_,
     //std::function<void(pbMessageBatchUPtr)> &&onReceive, // Transport::handleRequest
     //std::function<void(uint64_t, uint64_t, uint64_t)> &&confirm, // Transport::handleSnapshotConfirm
@@ -65,13 +68,15 @@ class SnapshotChunkManager {
   std::shared_ptr<std::mutex> getSnapshotLock(const std::string &key);
   std::shared_ptr<track> onNewChunk(const std::string &key, pbSnapshotChunkSPtr chunk);
   void gc();
+  void deleteTrack(const std::string &key);
   // TODO: move to the class SnapshotChunk
   void deleteTempChunkDir(const pbSnapshotChunk &chunk);
   bool shouldUpdateValidator(const pbSnapshotChunk &chunk);
-  bool nodeRemoved(const pbSnapshotChunk &chunk);
+  StatusWith<bool> nodeRemoved(const pbSnapshotChunk &chunk);
   Status saveChunk(const pbSnapshotChunk &chunk);
+  Status finalizeSnapshot(const pbSnapshotChunk &chunk, const pbMessageBatch &msg);
   server::SnapshotEnv getSnapshotEnv(const pbSnapshotChunk &chunk);
-
+  pbMessageBatchUPtr toMessageBatch(const pbSnapshotChunk &chunk, const std::vector<pbSnapshotFileSPtr> &files);
   const uint64_t timeoutTick_;
   const uint64_t gcTick_;
   const uint64_t maxConcurrentSlot_;
@@ -82,9 +87,10 @@ class SnapshotChunkManager {
   bool validate_;
   std::function<std::string(uint64_t, uint64_t)> snapshotLocator_;
   std::mutex mutex_;
-  std::unordered_map<std::string, std::shared_ptr<track>> tracked_; // guarded by mutex_
+  std::unordered_map<std::string, std::shared_ptr<track>> tracked_; // guarded by mutex_, tracked_[key] is guarded by locks_[key]
   std::unordered_map<std::string, std::shared_ptr<std::mutex>> locks_; // guarded by mutex_
 };
+using SnapshotChunkManagerUPtr = std::unique_ptr<SnapshotChunkManager>;
 
 } // namespace transport
 
