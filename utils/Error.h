@@ -16,6 +16,8 @@ namespace ycrt
 enum class ErrorCode : uint32_t {
   OK = 0,
   FileSystem,
+  ShortWrite,
+  ShortRead,
   InvalidConfig,
   BatchSendSkipped,
   ChunkSendSkipped,

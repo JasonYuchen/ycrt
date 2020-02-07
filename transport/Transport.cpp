@@ -58,8 +58,10 @@ Transport::Transport(
     sendChannels_(),
     sourceAddress_(nhConfig.RaftAddress),
     resolver_(resolver),
+    chunkManager_(SnapshotChunkManager::New(*this, std::move(locator))),
     handlers_(handlers)
 {
+  // TODO: run timer on SnapshotChunkManager
   for (size_t i = 0; i < ioContexts; ++i) {
     ioctxs_.emplace_back(new ioctx());
   }
@@ -109,6 +111,8 @@ bool Transport::AsyncSendSnapshot(pbMessageUPtr m)
       sourceAddress_, FmtClusterNode(m->cluster_id(), m->to()));
     return false;
   }
+  // TODO:
+  return true;
 }
 
 void Transport::Start()
@@ -160,14 +164,14 @@ io_context &Transport::nextIOContext()
   return ioctxs_[ioctxIdx_.fetch_add(1) % ioctxs_.size()]->io;
 }
 
-void Transport::HandleRequest(pbMessageBatchUPtr m)
+bool Transport::HandleRequest(pbMessageBatchUPtr m)
 {
   if (m->deployment_id() != deploymentID_) {
     log->warn(
       "deployment id does not match,"
       " received {0:d}, actual {1:d}, message dropped",
       m->deployment_id(), deploymentID_);
-    return;
+    return false;
   }
   // FIXME: Check RPC Bin Ver
   const string &addr = m->source_address();
@@ -184,22 +188,24 @@ void Transport::HandleRequest(pbMessageBatchUPtr m)
   }
   handlers_.handleMessageBatch(std::move(m));
   // TODO: metrics
+  return true;
 }
 
-void Transport::HandleSnapshotChunk(pbSnapshotChunkSPtr m)
+bool Transport::HandleSnapshotChunk(pbSnapshotChunkSPtr m)
 {
-  // FIXME
+  return chunkManager_->AddChunk(std::move(m));
 }
 
-void Transport::HandleSnapshotConfirm(
+bool Transport::HandleSnapshotConfirm(
   uint64_t clusterID,
   uint64_t nodeID,
   uint64_t from)
 {
   handlers_.handleSnapshot(clusterID, nodeID, from);
+  return true;
 }
 
-void Transport::HandleUnreachable(const std::string &address)
+bool Transport::HandleUnreachable(const std::string &address)
 {
   vector<NodeInfo> remotes = resolver_.ReverseResolve(address);
   log->info("node {0} becomes unreachable, affecting {1} raft nodes",
@@ -207,6 +213,7 @@ void Transport::HandleUnreachable(const std::string &address)
   for (auto &node : remotes) {
     handlers_.handleUnreachable(node.ClusterID, node.NodeID);
   }
+  return true;
 }
 
 } // namespace transport

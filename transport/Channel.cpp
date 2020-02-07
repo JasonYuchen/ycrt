@@ -215,6 +215,7 @@ void SendChannel::checkIdle()
 void SendChannel::stop()
 {
   if (!stopped_) {
+    transport_.HandleUnreachable(nodeRecord_->Address);
     stopped_ = true;
     socket_.close();
     idleTimer_.cancel();
@@ -281,22 +282,28 @@ void RecvChannel::readPayload()
           auto msg = make_unique<raftpb::MessageBatch>();
           auto done = msg->ParseFromArray(payloadBuf_.data(), header_.Size);
           if (!done) {
-            log->error("RecvChannel closed due to invalid payload(MessageBatch)",
-              ec.message());
+            log->error("RecvChannel closed due to invalid MessageBatch");
             stop();
             return;
           }
-          transport_.HandleRequest(std::move(msg));
+          if (!transport_.HandleRequest(std::move(msg))) {
+            log->error("RecvChannel closed due to request rejected by handler");
+            stop();
+            return;
+          }
         } else if (header_.Method == SnapshotChunkType) {
           auto msg = make_unique<raftpb::SnapshotChunk>();
           auto done = msg->ParseFromArray(payloadBuf_.data(), header_.Size);
           if (!done) {
-            log->error("RecvChannel closed due to invalid payload(SnapshotChunk)",
-              ec.message());
+            log->error("RecvChannel closed due to invalid SnapshotChunk");
             stop();
             return;
           }
-          transport_.HandleSnapshotChunk(std::move(msg));
+          if (!transport_.HandleSnapshotChunk(std::move(msg))) {
+            log->error("RecvChannel closed due to chunk rejected by handler");
+            stop();
+            return;
+          }
         } else {
           // should not reach here
           log->error("RecvChannel closed due to invalid method type");
@@ -307,8 +314,7 @@ void RecvChannel::readPayload()
       } else if (ec.value() == error::operation_aborted) {
         return;
       } else {
-        log->error("RecvChannel closed due to async_read error {0}",
-          ec.message());
+        log->error("RecvChannel closed due to error {0}", ec.message());
         stop();
         return;
       }

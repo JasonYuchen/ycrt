@@ -54,13 +54,13 @@ class Transport {
   void RemoveSendChannel(const std::string &key);
 
   // receive a normal message, called by RecvChannel
-  void HandleRequest(pbMessageBatchUPtr m);
+  bool HandleRequest(pbMessageBatchUPtr m);
   // receive a snapshot chunk, called by RecvChannel
-  void HandleSnapshotChunk(pbSnapshotChunkSPtr m);
+  bool HandleSnapshotChunk(pbSnapshotChunkSPtr m);
   // receive the last piece of snapshot and notify the corresponding cluster, called by
-  void HandleSnapshotConfirm(uint64_t clusterID, uint64_t nodeID, uint64_t from);
+  bool HandleSnapshotConfirm(uint64_t clusterID, uint64_t nodeID, uint64_t from);
   // remote node is unreachable, notify the corresponding cluster, called by
-  void HandleUnreachable(const std::string &address);
+  bool HandleUnreachable(const std::string &address);
 
   ~Transport();
  private:
@@ -102,6 +102,7 @@ class Transport {
   // server::Context serverCtx_;
   std::string sourceAddress_;
   Nodes &resolver_; // owned by NodeHost
+  SnapshotChunkManagerUPtr chunkManager_;
   RaftMessageHandler &handlers_; // owned by NodeHost
 };
 using TransportUPtr = std::unique_ptr<Transport>;
