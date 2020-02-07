@@ -45,6 +45,7 @@ Transport::Transport(
     sendQueueLength_(Soft::ins().SendQueueLength),
     getConnectedTimeoutS_(Soft::ins().GetConnectedTimeoutS),
     idleTimeoutS_(60), // TODO: add idleTimeoutS to soft?, add idleTimeoutS_ to Asio to handle timeout events
+    maxSnapshotLanes_(Soft::ins().MaxSnapshotConnections),
     log(Log.GetLogger("transport")),
     io_(1),
     worker_(io_),
@@ -86,6 +87,7 @@ bool Transport::AsyncSendMessage(pbMessageUPtr m)
     lock_guard<mutex> guard(mutex_);
     auto it = sendChannels_.find(node->Key);
     if (it == sendChannels_.end()) {
+      // TODO: add CircuitBreaker
       ch = make_shared<SendChannel>(
         *this, nextIOContext(), sourceAddress_, node, sendQueueLength_);
       sendChannels_[node->Key] = ch;
@@ -107,11 +109,21 @@ bool Transport::AsyncSendSnapshot(pbMessageUPtr m)
   NodesRecordSPtr node = resolver_.Resolve(m->cluster_id(), m->to());
   if (node == nullptr) {
     log->warn(
-      "{0} do not have the address for {1}, dropping a message",
+      "{0} do not have the address for {1}, dropping a snapshot",
       sourceAddress_, FmtClusterNode(m->cluster_id(), m->to()));
+    handlers_.handleSnapshotStatus(m->cluster_id(), m->to(), true);
     return false;
   }
-  // TODO:
+  vector<pbSnapshotChunkSPtr> chunks = splitSnapshotMessage(*m);
+  // TODO: add CircuitBreaker
+  if (lanes_ > maxSnapshotLanes_) {
+    log->warn("snapshot lane count exceeds maxSnapshotLanes, abort");
+    handlers_.handleSnapshotStatus(m->cluster_id(), m->to(), true);
+    return false;
+  }
+  auto lane = make_shared<SnapshotLane>(
+    *this, lanes_, nextIOContext(), sourceAddress_, node);
+  lane->Start(std::move(chunks));
   return true;
 }
 
@@ -157,11 +169,6 @@ Transport::~Transport()
   if (!stopped_) {
     Stop();
   }
-}
-
-io_context &Transport::nextIOContext()
-{
-  return ioctxs_[ioctxIdx_.fetch_add(1) % ioctxs_.size()]->io;
 }
 
 bool Transport::HandleRequest(pbMessageBatchUPtr m)
@@ -214,6 +221,11 @@ bool Transport::HandleUnreachable(const std::string &address)
     handlers_.handleUnreachable(node.ClusterID, node.NodeID);
   }
   return true;
+}
+
+io_context &Transport::nextIOContext()
+{
+  return ioctxs_[ioctxIdx_.fetch_add(1) % ioctxs_.size()]->io;
 }
 
 } // namespace transport

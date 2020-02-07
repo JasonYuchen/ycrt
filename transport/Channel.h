@@ -53,7 +53,7 @@ class Transport;
 class SendChannel : public std::enable_shared_from_this<SendChannel> {
  public:
   explicit SendChannel(
-    Transport &tranport,
+    Transport &transport,
     boost::asio::io_context &io,
     std::string source,
     NodesRecordSPtr nodeRecord,
@@ -113,10 +113,21 @@ class SnapshotLane : public std::enable_shared_from_this<SnapshotLane> {
  public:
   explicit SnapshotLane(
     Transport &transport,
-    boost::asio::io_context &io);
+    std::atomic_uint64_t &laneCount,
+    boost::asio::io_context &io,
+    std::string source,
+    NodesRecordSPtr nodeRecord);
+  void Start(std::vector<pbSnapshotChunkSPtr> &&savedChunks);
+  ~SnapshotLane();
  private:
+  void sendMessage();
+  void resolve();
+  void connect(boost::asio::ip::tcp::resolver::results_type endpointIter);
+  void checkIdle();
+  void stop();
   slogger log;
   Transport &transport_;
+  std::atomic_uint64_t &laneCount_;
   std::atomic_bool isConnected_;
   std::atomic_bool inQueue_;
   std::string sourceAddress_;
@@ -126,8 +137,7 @@ class SnapshotLane : public std::enable_shared_from_this<SnapshotLane> {
   boost::asio::steady_timer idleTimer_;
   bool stopped_;
   NodesRecordSPtr nodeRecord_;
-  BlockingConcurrentQueueSPtr<pbMessageUPtr> bufferQueue_;
-  std::queue<pbMessageBatchUPtr> outputQueue_;
+  std::vector<pbSnapshotChunkSPtr> outputQueue_;
   std::string buffer_;
 };
 

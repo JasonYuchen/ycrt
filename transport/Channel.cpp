@@ -24,13 +24,13 @@ constexpr seconds ReadHeaderDuration(1);
 constexpr seconds ReadPayloadDuration(1);
 
 SendChannel::SendChannel(
-  Transport &tranport,
+  Transport &transport,
   io_context &io,
   string source,
   NodesRecordSPtr nodeRecord,
   uint64_t queueLen)
   : log(Log.GetLogger("transport")),
-    transport_(tranport),
+    transport_(transport),
     isConnected_(false),
     inQueue_(false),
     sourceAddress_(std::move(source)),
@@ -365,6 +365,66 @@ void RecvChannel::stop()
     socket_.close();
     idleTimer_.cancel();
   }
+}
+
+SnapshotLane::SnapshotLane(
+  Transport &transport,
+  atomic_uint64_t &laneCount,
+  io_context &io,
+  string source,
+  NodesRecordSPtr nodeRecord)
+  : log(Log.GetLogger("transport")),
+    transport_(transport),
+    laneCount_(laneCount),
+    isConnected_(false),
+    inQueue_(false),
+    sourceAddress_(std::move(source)),
+    io_(io),
+    socket_(io),
+    resolver_(io),
+    idleTimer_(io),
+    stopped_(false),
+    nodeRecord_(std::move(nodeRecord))
+{
+  buffer_.reserve(RequestHeaderSize);
+  laneCount_++;
+}
+
+void SnapshotLane::Start(std::vector<pbSnapshotChunkSPtr> &&savedChunks)
+{
+  outputQueue_ = std::move(savedChunks);
+  resolve();
+  checkIdle();
+}
+
+SnapshotLane::~SnapshotLane()
+{
+  laneCount_--;
+}
+
+void SnapshotLane::sendMessage()
+{
+  // TODO:
+}
+
+void SnapshotLane::resolve()
+{
+  // TODO:
+}
+
+void SnapshotLane::connect(tcp::resolver::results_type endpointIter)
+{
+  // TODO:
+}
+
+void SnapshotLane::checkIdle()
+{
+  // TODO:
+}
+
+void SnapshotLane::stop()
+{
+  // TODO:
 }
 
 } // namespace transport
