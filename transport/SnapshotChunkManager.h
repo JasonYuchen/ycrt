@@ -21,6 +21,22 @@ namespace ycrt
 namespace transport
 {
 
+class SnapshotChunkFile {
+ public:
+  enum Mode { CREATE, READ, APPEND };
+  static SnapshotChunkFile Open(boost::filesystem::path file, Mode mode);
+  SnapshotChunkFile(int fd, bool syncDir, boost::filesystem::path dir);
+  StatusWith<uint64_t> Read(std::string &buf);
+  StatusWith<uint64_t> ReadAt(std::string &buf, int64_t offset);
+  StatusWith<uint64_t> Write(const std::string &buf);
+  Status Sync();
+  ~SnapshotChunkFile();
+ private:
+  int fd_;
+  bool syncDir_;
+  boost::filesystem::path dir_;
+};
+
 class Transport;
 class SnapshotChunkManager {
  public:

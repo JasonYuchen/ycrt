@@ -14,6 +14,85 @@ namespace transport
 
 using namespace std;
 using namespace settings;
+using namespace boost::filesystem;
+
+SnapshotChunkFile SnapshotChunkFile::Open(path file, Mode mode)
+{
+  if (mode == CREATE) {
+    int fd = ::open(file.c_str(), O_CREAT | O_RDWR | O_TRUNC | O_CLOEXEC);
+    if (fd < 0) {
+      throw Error(ErrorCode::FileSystem, strerror(errno));
+    }
+    return SnapshotChunkFile(fd, true, file.parent_path());
+  } else if (mode == READ) {
+    int fd = ::open(file.c_str(), O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+      throw Error(ErrorCode::FileSystem, strerror(errno));
+    }
+    return SnapshotChunkFile(fd, false, {});
+  } else if (mode == APPEND) {
+    int fd = ::open(file.c_str(), O_RDWR | O_APPEND | O_CLOEXEC);
+    if (fd < 0) {
+      throw Error(ErrorCode::FileSystem, strerror(errno));
+    }
+    return SnapshotChunkFile(fd, false, {});
+  } else {
+    throw Error(ErrorCode::Other, "unknown snapshot chunk file open mode");
+  }
+}
+
+SnapshotChunkFile::SnapshotChunkFile(int fd, bool syncDir, path dir)
+  : fd_(fd), syncDir_(syncDir), dir_(std::move(dir))
+{
+}
+
+StatusWith<uint64_t> SnapshotChunkFile::Read(std::string &buf)
+{
+  size_t size = ::read(fd_, const_cast<char*>(buf.data()), buf.size());
+  if (size != buf.size()) {
+    return {size, ErrorCode::FileSystem};
+  }
+  return size;
+}
+
+StatusWith<uint64_t> SnapshotChunkFile::ReadAt(std::string &buf, int64_t offset)
+{
+  size_t size = ::lseek(fd_, offset, SEEK_SET);
+  if (size < 0) {
+    return ErrorCode::FileSystem;
+  }
+  size = ::read(fd_, const_cast<char*>(buf.data()), buf.size());
+  if (size != buf.size()) {
+    return {size, ErrorCode::FileSystem};
+  }
+  return size;
+}
+
+StatusWith<uint64_t> SnapshotChunkFile::Write(const std::string &buf)
+{
+  size_t size = ::write(fd_, buf.data(), buf.size());
+  if (size != buf.size()) {
+    return {size, ErrorCode::FileSystem};
+  }
+  return size;
+}
+
+Status SnapshotChunkFile::Sync()
+{
+  return SyncFd(fd_);
+}
+
+SnapshotChunkFile::~SnapshotChunkFile()
+{
+  if (::close(fd_) < 0) {
+    Log.GetLogger("transport")->warn(
+      "failed to close fd={0} in chunk file dtor due to {1}",
+      fd_, strerror(errno));
+  }
+  if (syncDir_) {
+    SyncDir(dir_);
+  }
+}
 
 // TODO: move to class SnapshotChunk
 static string GetSnapshotKey(const pbSnapshotChunk &chunk)
@@ -57,6 +136,7 @@ bool SnapshotChunkManager::AddChunk(pbSnapshotChunkSPtr chunk)
     return false;
   }
   // TODO
+  return true;
 }
 
 void SnapshotChunkManager::Tick()
@@ -170,6 +250,7 @@ void SnapshotChunkManager::deleteTempChunkDir(const pbSnapshotChunk &chunk)
 bool SnapshotChunkManager::shouldUpdateValidator(const pbSnapshotChunk &chunk)
 {
   // TODO
+  return false;
 }
 
 bool SnapshotChunkManager::nodeRemoved(const pbSnapshotChunk &chunk)
@@ -186,7 +267,10 @@ Status SnapshotChunkManager::saveChunk(const pbSnapshotChunk &chunk)
       return s;
     }
   }
+  auto filename = path(chunk.filepath()).filename();
+  auto file = env.GetTempDir() / filename;
   // TODO
+  return ErrorCode::OK;
 }
 
 server::SnapshotEnv SnapshotChunkManager::getSnapshotEnv(
