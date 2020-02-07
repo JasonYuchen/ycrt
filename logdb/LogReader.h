@@ -124,7 +124,11 @@ class LogDB {
     uint64_t nodeID,
     uint64_t low,
     uint64_t high,
-    uint64_t maxSize){};
+    uint64_t maxSize)
+  {
+    // FIXME
+    return ErrorCode::Other;
+  };
   // RemoveEntriesTo removes entries associated with the specified Raft node up
   // to the specified index.
   Status RemoveEntriesTo(uint64_t clusterID, uint64_t nodeID, uint64_t index);

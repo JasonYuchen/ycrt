@@ -57,9 +57,9 @@ class Transport {
   bool HandleRequest(pbMessageBatchUPtr m);
   // receive a snapshot chunk, called by RecvChannel
   bool HandleSnapshotChunk(pbSnapshotChunkSPtr m);
-  // receive the last piece of snapshot and notify the corresponding cluster, called by
+  // receive the last piece of snapshot and notify the corresponding cluster, called by SnapshotChunkManager
   bool HandleSnapshotConfirm(uint64_t clusterID, uint64_t nodeID, uint64_t from);
-  // remote node is unreachable, notify the corresponding cluster, called by
+  // remote node is unreachable, notify the corresponding cluster, called by SendChannel
   bool HandleUnreachable(const std::string &address);
 
   ~Transport();
