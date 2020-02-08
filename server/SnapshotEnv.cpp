@@ -32,28 +32,29 @@ static const char *getSuffix(SnapshotEnv::Mode mode)
   }
 }
 
+// use 020X (the max number of type uint64_t)
 static path getTmpDir(
   const path &rootDir,
   const char *suffix,
   uint64_t index,
   uint64_t from)
 {
-  return rootDir / fmt::format("snapshot-{0:016X}-{1}.{2}", index, from, suffix);
+  return rootDir / fmt::format("snapshot-{0:020X}-{1}.{2}", index, from, suffix);
 }
 
 static path getFinalDir(const path &rootDir, uint64_t index)
 {
-  return rootDir / fmt::format("snapshot-{0:016X}", index);
+  return rootDir / fmt::format("snapshot-{0:020X}", index);
 }
 
 static path getFileName(uint64_t index)
 {
-  return fmt::format("snapshot-{0:016X}.{1}", index, fileSuffix);
+  return fmt::format("snapshot-{0:020X}.{1}", index, fileSuffix);
 }
 
 static path getShrunkFileName(uint64_t index)
 {
-  return fmt::format("snapshot-{0:016X}.{1}", index, shrunkSuffix);
+  return fmt::format("snapshot-{0:020X}.{1}", index, shrunkSuffix);
 }
 
 SnapshotEnv::SnapshotEnv(
