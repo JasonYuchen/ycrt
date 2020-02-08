@@ -79,7 +79,7 @@ StatusWith<bool> IsDirMarkedAsDeleted(const path &dir)
 {
   error_code ec;
   bool existing = exists(dir / deletedFlagFile, ec);
-  if (ec) {
+  if (ec && ec.value() != ENOENT) {
     return ErrorCode::FileSystem;
   } else {
     return existing;
