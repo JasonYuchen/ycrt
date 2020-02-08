@@ -336,7 +336,7 @@ Status SnapshotChunkManager::finalizeSnapshot(
 {
   auto env = getSnapshotEnv(chunk);
   string data;
-  if (msg.requests(0).SerializeToString(&data)) {
+  if (!msg.requests(0).SerializeToString(&data)) {
     throw Error(ErrorCode::Other, "should not reach here");
   }
   return env.FinalizeSnapshot(data);

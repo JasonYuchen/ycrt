@@ -428,15 +428,19 @@ SnapshotLane::~SnapshotLane()
 void SnapshotLane::prepareBuffer()
 {
   // FIXME: do not hack
-  RequestHeader header{RequestType, 0, 0};
+  RequestHeader header{SnapshotChunkType, 0, 0};
   buffer_.clear();
   buffer_.insert(0, RequestHeaderSize, 0);
   header.Encode(const_cast<char *>(buffer_.data()), RequestHeaderSize);
   // FIXME: load file chunk to chunk->data
   outputQueue_.front()->set_deployment_id(transport_.GetDeploymentID());
   if (!outputQueue_.front()->witness()) {
-    outputQueue_.front()->set_data("fill me");
-
+    StatusWith<string> data = loadSnapshotChunkData(*outputQueue_.front());
+    if (!data.IsOK()) {
+      stop();
+      return;
+    }
+    outputQueue_.front()->set_data(std::move(data.GetMutableOrThrow()));
   }
   outputQueue_.front()->AppendToString(&buffer_);
   uint64_t total = buffer_.size() - RequestHeaderSize;
@@ -447,7 +451,7 @@ void SnapshotLane::sendMessage()
 {
   idleTimer_.expires_from_now(SendDuration);
   prepareBuffer();
-  log->info("SnapshotLane is sending chunk {0}/{1} to {2}", outputQueue_.front()->chunk_id(), total_, nodeRecord_->Address);
+  log->info("SnapshotLane is sending chunk {0}/{1} to {2}", outputQueue_.front()->chunk_id() + 1, total_, nodeRecord_->Address);
   boost::asio::async_write(socket_,
     buffer(buffer_.data(), buffer_.length()),
     [this, self = shared_from_this()](error_code ec, size_t length)

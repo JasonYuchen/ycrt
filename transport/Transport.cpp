@@ -53,7 +53,7 @@ static uint64_t splitBySnapshotFile(
     chunk->set_from(m.from());
     chunk->set_file_chunk_id(i);
     chunk->set_file_chunk_count(chunkCount);
-    chunk->set_chunk_id(chunkID + 1);
+    chunk->set_chunk_id(chunkID + i);
     chunk->set_chunk_size(chunkSize);
     chunk->set_index(m.snapshot().index());
     chunk->set_term(m.snapshot().term());
@@ -141,6 +141,8 @@ Transport::Transport(
     deploymentID_(nhConfig.DeploymentID),
     mutex_(),
     sendChannels_(),
+    breakers_(),
+    lanes_(0),
     sourceAddress_(nhConfig.RaftAddress),
     resolver_(resolver),
     chunkManager_(SnapshotChunkManager::New(*this, std::move(locator))),
