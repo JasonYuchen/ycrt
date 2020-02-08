@@ -70,6 +70,13 @@ class Status {
 
   ErrorCode Code() const { return error_; }
   bool IsOK() const { return error_ == ErrorCode::OK; }
+  bool IsOKOrThrow() const
+  {
+    if (error_ != ErrorCode::OK) {
+      throw Error(error_);
+    }
+    return true;
+  }
  private:
   ErrorCode error_;
 };

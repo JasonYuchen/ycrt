@@ -11,6 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <boost/asio.hpp>
 #include "utils/Utils.h"
 #include "pb/RaftMessage.h"
 #include "server/SnapshotEnv.h"
@@ -45,15 +46,14 @@ class Transport;
 class SnapshotChunkManager {
  public:
   static std::unique_ptr<SnapshotChunkManager> New(
-    Transport &transport_,
-    //std::function<void(pbMessageBatchUPtr)> &&onReceive, // Transport::handleRequest
-    //std::function<void(uint64_t, uint64_t, uint64_t)> &&confirm, // Transport::handleSnapshotConfirm
-    //std::function<uint64_t()> &&deploymentIDFunc, // Transport::deploymentID_
+    Transport &transport,
+    boost::asio::io_context &io,
     server::SnapshotLocator &&locator);
 
   // AddChunk adds a received trunk to chunks
   bool AddChunk(pbSnapshotChunkSPtr chunk);
-  void Tick();
+  // RunTicker runs a timer with 1 seconds interval to trigger gc
+  void RunTicker();
  private:
   struct track {
     pbSnapshotChunkSPtr firstChunk;
@@ -65,6 +65,7 @@ class SnapshotChunkManager {
 
   SnapshotChunkManager(
     Transport &transport_,
+    boost::asio::io_context &io_,
     std::function<std::string(uint64_t, uint64_t)> &&getSnapshotDir);
   std::shared_ptr<std::mutex> getSnapshotLock(const std::string &key);
   std::shared_ptr<track> onNewChunk(const std::string &key, pbSnapshotChunkSPtr chunk);
@@ -72,18 +73,21 @@ class SnapshotChunkManager {
   void deleteTrack(const std::string &key);
   // TODO: move to the class SnapshotChunk
   void deleteTempChunkDir(const pbSnapshotChunk &chunk);
-  bool shouldUpdateValidator(const pbSnapshotChunk &chunk);
-  StatusWith<bool> nodeRemoved(const pbSnapshotChunk &chunk);
+  bool shouldUpdateValidator(const pbSnapshotChunk &chunk) const;
+  StatusWith<bool> nodeRemoved(const pbSnapshotChunk &chunk) const;
   Status saveChunk(const pbSnapshotChunk &chunk);
   Status finalizeSnapshot(const pbSnapshotChunk &chunk, const pbMessageBatch &msg);
-  server::SnapshotEnv getSnapshotEnv(const pbSnapshotChunk &chunk);
-  pbMessageBatchUPtr toMessageBatch(const pbSnapshotChunk &chunk, const std::vector<pbSnapshotFileSPtr> &files);
+  server::SnapshotEnv getSnapshotEnv(const pbSnapshotChunk &chunk) const;
+  pbMessageBatchUPtr toMessageBatch(
+    const pbSnapshotChunk &chunk,
+    const std::vector<pbSnapshotFileSPtr> &files) const;
   const uint64_t timeoutTick_;
   const uint64_t gcTick_;
   const uint64_t maxConcurrentSlot_;
 
   slogger log;
   Transport &transport_;
+  boost::asio::steady_timer gcTimer_;
   std::atomic_uint64_t currentTick_;
   bool validate_;
   std::function<std::string(uint64_t, uint64_t)> snapshotLocator_;

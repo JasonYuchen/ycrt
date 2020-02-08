@@ -47,7 +47,6 @@ class Transport {
   bool AsyncSendMessage(pbMessageUPtr m);
   bool AsyncSendSnapshot(pbMessageUPtr m);
   //std::shared_ptr<Sink> GetStreamConnection(uint64_t clusterID, uint64_t nodeID);
-  void Start();
   void Stop();
   void RemoveSendChannel(const std::string &key);
 
@@ -70,6 +69,7 @@ class Transport {
     RaftMessageHandler &handlers,
     std::function<std::string(uint64_t, uint64_t)> &&snapshotDirFunc,
     uint64_t ioContexts);
+  void start();
   boost::asio::io_context &nextIOContext();
 
   const uint64_t streamConnections_;

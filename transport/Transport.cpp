@@ -22,7 +22,7 @@ using namespace boost::asio;
 using boost::system::error_code;
 using boost::system::system_error;
 
-// TODO: move this method to pbSnapshot
+// TODO: move this method to pbMessage
 static uint64_t splitBySnapshotFile(
   vector<pbSnapshotChunkSPtr> &chunks,
   uint64_t chunkID,
@@ -69,6 +69,7 @@ static uint64_t splitBySnapshotFile(
   }
   return chunkCount;
 }
+
 static vector<pbSnapshotChunkSPtr> getChunks(const pbMessage &m)
 {
   uint64_t startChunkID = 0;
@@ -115,7 +116,8 @@ TransportUPtr Transport::New(
 {
   TransportUPtr t(new Transport(
     nhConfig, resolver, handlers, std::move(locator), ioContexts));
-  t->Start();
+  t->log->info("start listening on {0}", nhConfig.ListenAddress);
+  t->start();
   return t;
 }
 
@@ -145,14 +147,14 @@ Transport::Transport(
     lanes_(0),
     sourceAddress_(nhConfig.RaftAddress),
     resolver_(resolver),
-    chunkManager_(SnapshotChunkManager::New(*this, std::move(locator))),
+    chunkManager_(SnapshotChunkManager::New(*this, io_, std::move(locator))),
     handlers_(handlers)
 {
   // TODO: run timer on SnapshotChunkManager
   for (size_t i = 0; i < ioContexts; ++i) {
     ioctxs_.emplace_back(new ioctx());
   }
-  log->info("start listening on {0}", nhConfig.ListenAddress);
+  chunkManager_->RunTicker();
 }
 
 bool Transport::AsyncSendMessage(pbMessageUPtr m)
@@ -216,24 +218,6 @@ bool Transport::AsyncSendSnapshot(pbMessageUPtr m)
     NodeInfo{m->cluster_id(), m->to()});
   lane->Start(std::move(chunks));
   return true;
-}
-
-void Transport::Start()
-{
-  auto conn = make_shared<RecvChannel>(*this, nextIOContext());
-  acceptor_.async_accept(
-    conn->socket(),
-    [conn, this](const error_code &ec) mutable {
-      if (!ec) {
-        log->info("new connection received from {0}", conn->socket().remote_endpoint().address().to_string());
-        conn->Start();
-      } else if (ec.value() == error::operation_aborted) {
-        return;
-      } else {
-        log->warn("async_accept error {0}", ec.message());
-      }
-      Start();
-    });
 }
 
 void Transport::Stop()
@@ -320,6 +304,24 @@ bool Transport::HandleUnreachable(const std::string &address)
     handlers_.handleUnreachable(node.ClusterID, node.NodeID);
   }
   return true;
+}
+
+void Transport::start()
+{
+  auto conn = make_shared<RecvChannel>(*this, nextIOContext());
+  acceptor_.async_accept(
+    conn->socket(),
+    [conn, this](const error_code &ec) mutable {
+      if (!ec) {
+        log->info("new connection received from {0}", conn->socket().remote_endpoint().address().to_string());
+        conn->Start();
+      } else if (ec.value() == error::operation_aborted) {
+        return;
+      } else {
+        log->warn("async_accept error {0}", ec.message());
+      }
+      start();
+    });
 }
 
 io_context &Transport::nextIOContext()

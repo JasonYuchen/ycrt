@@ -14,6 +14,8 @@ namespace transport
 
 using namespace std;
 using namespace settings;
+using namespace boost::asio;
+using namespace boost::asio::chrono;
 using namespace boost::filesystem;
 
 SnapshotChunkFile SnapshotChunkFile::Open(path file, Mode mode)
@@ -112,10 +114,11 @@ static string GetSnapshotKey(const pbSnapshotChunk &chunk)
 
 unique_ptr<SnapshotChunkManager> SnapshotChunkManager::New(
   Transport &transport,
+  io_context &io,
   function<string(uint64_t, uint64_t)> &&locator)
 {
   unique_ptr<SnapshotChunkManager> manager(
-    new SnapshotChunkManager(transport, std::move(locator)));
+    new SnapshotChunkManager(transport, io, std::move(locator)));
   return manager;
 }
 
@@ -180,22 +183,34 @@ bool SnapshotChunkManager::AddChunk(pbSnapshotChunkSPtr chunk)
   return true;
 }
 
-void SnapshotChunkManager::Tick()
+void SnapshotChunkManager::RunTicker()
 {
-  uint64_t tick = currentTick_.fetch_add(1);
-  if (tick % gcTick_ == 0) {
-    gc();
-  }
+  gcTimer_.expires_from_now(seconds(1));
+  gcTimer_.async_wait(
+    [this](error_code ec)
+  {
+    if (gcTimer_.expiry() <= steady_timer::clock_type::now()) {
+      uint64_t tick = currentTick_.fetch_add(1);
+      log->debug("SnapshotChunkManager Tick at {0}", tick);
+      if (tick % gcTick_ == 0) {
+        log->info("SnapshotChunkManger started gc at tick={0}", tick);
+        gc();
+      }
+      RunTicker();
+    }
+  });
 }
 
 SnapshotChunkManager::SnapshotChunkManager(
-  Transport &transport_,
+  Transport &transport,
+  io_context &io,
   function<string(uint64_t, uint64_t)> &&locator)
   : timeoutTick_(Soft::ins().SnapshotChunkTimeoutTick),
     gcTick_(Soft::ins().SnapshotGCTick),
     maxConcurrentSlot_(Soft::ins().MaxConcurrentStreamingSnapshot),
     log(Log.GetLogger("transport")),
-    transport_(transport_),
+    transport_(transport),
+    gcTimer_(io),
     currentTick_(0),
     validate_(true),
     snapshotLocator_(std::move(locator)),
@@ -294,12 +309,14 @@ void SnapshotChunkManager::deleteTempChunkDir(const pbSnapshotChunk &chunk)
   getSnapshotEnv(chunk).RemoveTempDir(true);
 }
 
-bool SnapshotChunkManager::shouldUpdateValidator(const pbSnapshotChunk &chunk)
+bool SnapshotChunkManager::shouldUpdateValidator(
+  const pbSnapshotChunk &chunk) const
 {
   return validate_ && !chunk.has_file_info() && chunk.chunk_id() != 0;
 }
 
-StatusWith<bool> SnapshotChunkManager::nodeRemoved(const pbSnapshotChunk &chunk)
+StatusWith<bool> SnapshotChunkManager::nodeRemoved(
+  const pbSnapshotChunk &chunk) const
 {
   return IsDirMarkedAsDeleted(getSnapshotEnv(chunk).GetRootDir());
 }
@@ -343,7 +360,7 @@ Status SnapshotChunkManager::finalizeSnapshot(
 }
 
 server::SnapshotEnv SnapshotChunkManager::getSnapshotEnv(
-  const pbSnapshotChunk &chunk)
+  const pbSnapshotChunk &chunk) const
 {
   return server::SnapshotEnv(
     snapshotLocator_(chunk.cluster_id(), chunk.node_id()),
@@ -354,7 +371,7 @@ server::SnapshotEnv SnapshotChunkManager::getSnapshotEnv(
 
 pbMessageBatchUPtr SnapshotChunkManager::toMessageBatch(
   const pbSnapshotChunk &chunk,
-  const vector<pbSnapshotFileSPtr> &files)
+  const vector<pbSnapshotFileSPtr> &files) const
 {
   // FIXME:
   auto env = getSnapshotEnv(chunk);
