@@ -16,6 +16,24 @@ namespace ycrt
 namespace transport
 {
 
+// TODO:
+static StatusWith<string> loadSnapshotChunkData(const pbSnapshotChunk &chunk)
+{
+  try {
+    auto file = SnapshotChunkFile::Open(
+      chunk.filepath(), SnapshotChunkFile::READ);
+    uint64_t offset = chunk.file_chunk_id() * settings::SnapshotChunkSize;
+    string data;
+    data.resize(chunk.chunk_size());
+    file.ReadAt(data, offset).IsOKOrThrow();
+    return data;
+  } catch (Error &e) {
+    Log.GetLogger("transport")->error(
+      "failed to load chunk data due to {0}", e.what());
+    return e.Code();
+  }
+}
+
 // FIXME:
 constexpr seconds ResolveDuration(1);
 constexpr seconds ConnectDuration(1);
@@ -384,7 +402,7 @@ SnapshotLane::SnapshotLane(
     nodeRecord_(std::move(nodeRecord)),
     node_(node)
 {
-  buffer_.reserve(RequestHeaderSize);
+  buffer_.reserve(RequestHeaderSize + settings::SnapshotChunkSize);
   laneCount_++;
 }
 
@@ -414,6 +432,12 @@ void SnapshotLane::prepareBuffer()
   buffer_.clear();
   buffer_.insert(0, RequestHeaderSize, 0);
   header.Encode(const_cast<char *>(buffer_.data()), RequestHeaderSize);
+  // FIXME: load file chunk to chunk->data
+  outputQueue_.front()->set_deployment_id(transport_.GetDeploymentID());
+  if (!outputQueue_.front()->witness()) {
+    outputQueue_.front()->set_data("fill me");
+
+  }
   outputQueue_.front()->AppendToString(&buffer_);
   uint64_t total = buffer_.size() - RequestHeaderSize;
   ::memcpy(const_cast<char *>(buffer_.data()+8), &total, sizeof(total));

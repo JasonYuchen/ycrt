@@ -57,6 +57,7 @@ class Error : public std::runtime_error {
     : std::runtime_error(
         fmt::format(format_str, std::forward<Args>(args)...)),
       code_(code) { logger->critical(std::runtime_error::what()); }
+  ErrorCode Code() const { return code_; }
  private:
   ErrorCode code_;
 };

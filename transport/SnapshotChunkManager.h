@@ -24,6 +24,7 @@ namespace transport
 // {snapshot} - split, send (managed by Transport) ->
 // {chunk1 chunk2 ...} - receive, merge (managed by SnapshotChunkFile) ->
 // {snapshot}
+// TODO: consider throw instead of Status
 class SnapshotChunkFile {
  public:
   enum Mode { CREATE, READ, APPEND };

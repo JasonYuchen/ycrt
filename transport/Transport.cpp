@@ -22,6 +22,90 @@ using namespace boost::asio;
 using boost::system::error_code;
 using boost::system::system_error;
 
+// TODO: move this method to pbSnapshot
+static uint64_t splitBySnapshotFile(
+  vector<pbSnapshotChunkSPtr> &chunks,
+  uint64_t chunkID,
+  const pbMessage &m,
+  const string &filePath,
+  uint64_t fileSize,
+  pbSnapshotFile *allocatedFile)
+{
+  if (fileSize == 0) {
+    throw Error(ErrorCode::UnexpectedRaftMessage,
+      "empty file included in snapshot");
+  }
+  uint64_t chunkCount = (fileSize - 1) / settings::SnapshotChunkSize + 1;
+  Log.GetLogger("transport")->info(
+    "splitBySnapshotFile: chunk count={0}, file size={1}",
+    chunkCount, fileSize);
+  for (uint64_t i = 0; i < chunkCount; ++i) {
+    uint64_t chunkSize = 0;
+    if (i == chunkCount - 1) {
+      chunkSize = fileSize - (chunkCount - 1) * settings::SnapshotChunkSize;
+    } else {
+      chunkSize = settings::SnapshotChunkSize;
+    }
+    // leave chunk->data unset (will be filled in sending procedure)
+    auto chunk = make_shared<pbSnapshotChunk>();
+    chunk->set_cluster_id(m.cluster_id());
+    chunk->set_node_id(m.to());
+    chunk->set_from(m.from());
+    chunk->set_file_chunk_id(i);
+    chunk->set_file_chunk_count(chunkCount);
+    chunk->set_chunk_id(chunkID + 1);
+    chunk->set_chunk_size(chunkSize);
+    chunk->set_index(m.snapshot().index());
+    chunk->set_term(m.snapshot().term());
+    chunk->set_on_disk_index(m.snapshot().on_disk_index());
+    chunk->set_allocated_membership(new pbMembership(m.snapshot().membership()));
+    chunk->set_filepath(filePath);
+    chunk->set_file_size(fileSize);
+    chunk->set_witness(m.snapshot().witness());
+    if (allocatedFile != nullptr) {
+      chunk->set_allocated_file_info(allocatedFile);
+    }
+    chunks.push_back(std::move(chunk));
+  }
+  return chunkCount;
+}
+static vector<pbSnapshotChunkSPtr> getChunks(const pbMessage &m)
+{
+  uint64_t startChunkID = 0;
+  vector<pbSnapshotChunkSPtr> chunks;
+  uint64_t count = splitBySnapshotFile(
+    chunks,
+    startChunkID,
+    m,
+    m.snapshot().filepath(),
+    m.snapshot().file_size(),
+    nullptr);
+  startChunkID += count;
+  for (auto &file : m.snapshot().files()) {
+    count = splitBySnapshotFile(
+      chunks,
+      startChunkID,
+      m,
+      file.file_path(),
+      file.file_size(),
+      new pbSnapshotFile(file));
+    startChunkID += count;
+  }
+  for (auto &chunk : chunks) {
+    chunk->set_chunk_count(chunks.size());
+  }
+  return chunks;
+}
+static vector<pbSnapshotChunkSPtr> splitSnapshotMessage(const pbMessage &m)
+{
+  if (m.snapshot().witness()) {
+    // TODO: return getWitnessChunks(m);
+    throw Error(ErrorCode::Other, "witness snapshot not supported");
+  } else {
+    return getChunks(m);
+  }
+}
+
 TransportUPtr Transport::New(
   const NodeHostConfig &nhConfig,
   Nodes &resolver,
@@ -114,7 +198,7 @@ bool Transport::AsyncSendSnapshot(pbMessageUPtr m)
     handlers_.handleSnapshotStatus(m->cluster_id(), m->to(), true);
     return false;
   }
-  vector<pbSnapshotChunkSPtr> chunks;// TODO = splitSnapshotMessage(*m);
+  vector<pbSnapshotChunkSPtr> chunks = splitSnapshotMessage(*m);
   // TODO: add CircuitBreaker
   if (lanes_ > maxSnapshotLanes_) {
     log->warn("snapshot lane count exceeds maxSnapshotLanes, abort");
