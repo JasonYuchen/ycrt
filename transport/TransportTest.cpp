@@ -57,6 +57,7 @@ TEST(Transport, Client)
 
 TEST(Transport, AsyncSendSnapshotWith1Chunks)
 {
+  Log.GetLogger("transport")->set_level(spdlog::level::debug);
   auto nhConfig1 = NodeHostConfig();
   nhConfig1.DeploymentID = 10;
   nhConfig1.RaftAddress = "127.0.0.1:9009";
@@ -69,6 +70,7 @@ TEST(Transport, AsyncSendSnapshotWith1Chunks)
   string testPayload;
   testPayload.insert(0, 1 * 1024 * 1024, 'a');
   Status s = CreateFlagFile(path("test_snap_dir_1") / "snap", testPayload);
+  s.IsOKOrThrow();
   auto handler = RaftMessageHandler();
   auto resolver1 = Nodes::New([](uint64_t){return 0;});
   resolver1->AddNode(1, 2, "127.0.0.1:9090");
@@ -111,6 +113,7 @@ TEST(Transport, AsyncSendSnapshotWith1Chunks)
 
 TEST(Transport, AsyncSendSnapshotWith2Chunks)
 {
+  Log.GetLogger("transport")->set_level(spdlog::level::debug);
   auto nhConfig1 = NodeHostConfig();
   nhConfig1.DeploymentID = 10;
   nhConfig1.RaftAddress = "127.0.0.1:9009";
@@ -123,6 +126,7 @@ TEST(Transport, AsyncSendSnapshotWith2Chunks)
   string testPayload;
   testPayload.insert(0, 3 * 1024 * 1024, 'a');
   Status s = CreateFlagFile(path("test_snap_dir_1") / "snap", testPayload);
+  s.IsOKOrThrow();
   auto handler = RaftMessageHandler();
   auto resolver1 = Nodes::New([](uint64_t){return 0;});
   resolver1->AddNode(1, 2, "127.0.0.1:9090");
@@ -161,4 +165,20 @@ TEST(Transport, AsyncSendSnapshotWith2Chunks)
   transport1.reset();
   transport2.reset();
   ASSERT_EQ(1, 1);
+}
+
+TEST(Transport, SnapshotChunkManagerGC)
+{
+  Log.GetLogger("transport")->set_level(spdlog::level::debug);
+  auto locator = [](uint64_t,uint64_t){return "test_snap_dir_2";};
+  boost::asio::io_service io;
+  boost::asio::io_service::work work(io);
+  thread thread([&io](){io.run();});
+  int t;
+  auto manager = SnapshotChunkManager::New((Transport&)(t), io, locator);
+  manager->RunTicker();
+  std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+  io.stop();
+  thread.join();
+  Log.GetLogger("transport")->info("release...");
 }
