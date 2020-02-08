@@ -78,13 +78,19 @@ NodesRecordSPtr Nodes::Resolve(uint64_t clusterID, uint64_t nodeID)
   NodesRecordSPtr addr;
   {
     lock_guard<mutex> guard(addrsMutex_);
-    addr = addrs_[key];
+    auto it = addrs_.find(key);
+    if (it != addrs_.end()) {
+      addr = it->second;
+    }
   }
   if (addr == nullptr) {
     NodesRecordSPtr node;
     {
       lock_guard<mutex> guard(nodesMutex_);
-      node = nodes_[key];
+      auto it = nodes_.find(key);
+      if (it != nodes_.end()) {
+        node = it->second;
+      }
     }
     if (node == nullptr) {
       return nullptr; // errNotFound
