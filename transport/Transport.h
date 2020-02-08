@@ -27,9 +27,7 @@ namespace transport
 
 // TODO: format log output
 // TODO: enable CircuitBreaker
-// TODO: asyncSendSnapshot
 // TODO: snapshot streaming
-// TODO: enable idle timeout
 
 // owned by NodeHost
 class Transport {
@@ -53,6 +51,8 @@ class Transport {
   void Stop();
   void RemoveSendChannel(const std::string &key);
 
+  // send snapshot notification (succeed or failed), called by SnapshotLane
+  void SendSnapshotNotification(uint64_t clusterID, uint64_t nodeID, bool rej);
   // receive a normal message, called by RecvChannel
   bool HandleRequest(pbMessageBatchUPtr m);
   // receive a snapshot chunk, called by RecvChannel

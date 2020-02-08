@@ -71,6 +71,18 @@ SendChannel::~SendChannel()
 {
 }
 
+void SendChannel::prepareBuffer()
+{
+  // FIXME: do not hack
+  RequestHeader header{RequestType, 0, 0};
+  buffer_.clear();
+  buffer_.insert(0, RequestHeaderSize, 0);
+  header.Encode(const_cast<char *>(buffer_.data()), RequestHeaderSize);
+  outputQueue_.front()->AppendToString(&buffer_);
+  uint64_t total = buffer_.size() - RequestHeaderSize;
+  ::memcpy(const_cast<char *>(buffer_.data()+8), &total, sizeof(total));
+}
+
 void SendChannel::asyncSendMessage()
 {
   idleTimer_.expires_from_now(seconds(1));
@@ -99,14 +111,6 @@ void SendChannel::asyncSendMessage()
       if (!inProgress) {
         log->debug("SendChannel to {0} with next message {1}",
           nodeRecord_->Address, outputQueue_.front()->DebugString());
-        // FIXME: do not hack
-        RequestHeader header{RequestType, 0, 0};
-        buffer_.clear();
-        buffer_.insert(0, RequestHeaderSize, 0);
-        header.Encode(const_cast<char *>(buffer_.data()), RequestHeaderSize);
-        outputQueue_.front()->AppendToString(&buffer_);
-        uint64_t total = buffer_.size() - RequestHeaderSize;
-        ::memcpy(const_cast<char *>(buffer_.data()+8), &total, sizeof(total));
         sendMessage();
       }
     }
@@ -116,6 +120,7 @@ void SendChannel::asyncSendMessage()
 void SendChannel::sendMessage()
 {
   idleTimer_.expires_from_now(SendDuration);
+  prepareBuffer();
   log->debug("SendChannel send {0} bytes to {1}", buffer_.length(), nodeRecord_->Address);
   boost::asio::async_write(socket_,
     buffer(buffer_.data(), buffer_.length()),
@@ -126,14 +131,6 @@ void SendChannel::sendMessage()
         if (!outputQueue_.empty()) {
           log->debug("SendChannel to {0} with next message {1}",
             nodeRecord_->Address, outputQueue_.front()->DebugString());
-          // FIXME: do not hack
-          RequestHeader header{RequestType, 0, 0};
-          buffer_.clear();
-          buffer_.insert(0, RequestHeaderSize, 0);
-          header.Encode(const_cast<char *>(buffer_.data()), RequestHeaderSize);
-          outputQueue_.front()->AppendToString(&buffer_);
-          uint64_t total = buffer_.size() - RequestHeaderSize;
-          ::memcpy(const_cast<char *>(buffer_.data()+8), &total, sizeof(total));
           sendMessage();
         }
       } else if (ec.value() == error::operation_aborted) {
@@ -372,19 +369,20 @@ SnapshotLane::SnapshotLane(
   atomic_uint64_t &laneCount,
   io_context &io,
   string source,
-  NodesRecordSPtr nodeRecord)
+  NodesRecordSPtr nodeRecord,
+  NodeInfo node)
   : log(Log.GetLogger("transport")),
     transport_(transport),
     laneCount_(laneCount),
-    isConnected_(false),
-    inQueue_(false),
     sourceAddress_(std::move(source)),
     io_(io),
     socket_(io),
     resolver_(io),
     idleTimer_(io),
     stopped_(false),
-    nodeRecord_(std::move(nodeRecord))
+    rejected_(true),
+    nodeRecord_(std::move(nodeRecord)),
+    node_(node)
 {
   buffer_.reserve(RequestHeaderSize);
   laneCount_++;
@@ -392,7 +390,14 @@ SnapshotLane::SnapshotLane(
 
 void SnapshotLane::Start(std::vector<pbSnapshotChunkSPtr> &&savedChunks)
 {
-  outputQueue_ = std::move(savedChunks);
+  uint64_t id = 0;
+  for (auto &chunk : savedChunks) {
+    if (chunk->chunk_id() != id++) {
+      throw Error(ErrorCode::UnexpectedRaftMessage, log, "gap found in savedChunks");
+    }
+    outputQueue_.push(std::move(chunk));
+  }
+  total_ = id;
   resolve();
   checkIdle();
 }
@@ -402,29 +407,122 @@ SnapshotLane::~SnapshotLane()
   laneCount_--;
 }
 
+void SnapshotLane::prepareBuffer()
+{
+  // FIXME: do not hack
+  RequestHeader header{RequestType, 0, 0};
+  buffer_.clear();
+  buffer_.insert(0, RequestHeaderSize, 0);
+  header.Encode(const_cast<char *>(buffer_.data()), RequestHeaderSize);
+  outputQueue_.front()->AppendToString(&buffer_);
+  uint64_t total = buffer_.size() - RequestHeaderSize;
+  ::memcpy(const_cast<char *>(buffer_.data()+8), &total, sizeof(total));
+}
+
 void SnapshotLane::sendMessage()
 {
-  // TODO:
+  idleTimer_.expires_from_now(SendDuration);
+  prepareBuffer();
+  log->info("SnapshotLane is sending chunk {0}/{1} to {2}", outputQueue_.front()->chunk_id(), total_, nodeRecord_->Address);
+  boost::asio::async_write(socket_,
+    buffer(buffer_.data(), buffer_.length()),
+    [this, self = shared_from_this()](error_code ec, size_t length)
+    {
+      if (!ec) {
+        outputQueue_.pop();
+        if (!outputQueue_.empty()) {
+          log->debug("SnapshotLane to {0} with next message {1}",
+            nodeRecord_->Address, outputQueue_.front()->DebugString());
+          sendMessage();
+        } else {
+          log->info("SnapshotLane succeeded sending a snapshot with {0} chunks"
+                    " to {1} {2}", total_, nodeRecord_->Address,
+                    FmtClusterNode(node_.ClusterID, node_.NodeID));
+          rejected_ = false;
+          stop();
+        }
+      } else if (ec.value() == error::operation_aborted) {
+        return;
+      } else {
+        // FIXME: do log, nodeInfo_->key ?
+        log->warn("SnapshotLane to {0} closed due to async_write error {1}",
+          nodeRecord_->Address, ec.message());
+        transport_.RemoveSendChannel(nodeRecord_->Key);
+        stop();
+      }
+    });
 }
 
 void SnapshotLane::resolve()
 {
-  // TODO:
+  idleTimer_.expires_from_now(ResolveDuration);
+  resolver_.async_resolve(getEndpoint(string_view(nodeRecord_->Address)),
+    [this, self = shared_from_this()]
+      (error_code ec, tcp::resolver::results_type it) {
+      if (!ec) {
+        log->debug("remote endpoint resolved, connect to {0}", it->host_name());
+        connect(it);
+      } else if (ec.value() == error::operation_aborted) {
+        return;
+      } else {
+        log->warn("SnapshotLane to {0} closed due to async_resolve error {1}",
+          nodeRecord_->Address, ec.message());
+        stop();
+      }
+    });
 }
 
 void SnapshotLane::connect(tcp::resolver::results_type endpointIter)
 {
-  // TODO:
+  idleTimer_.expires_from_now(ConnectDuration);
+  boost::asio::async_connect(
+    socket_,
+    endpointIter,
+    [this, self = shared_from_this()](error_code ec, tcp::endpoint endpoint)
+    {
+      log->debug("SnapshotLane connect to {0} returned {1}",
+        endpoint.address().to_string(), ec.message());
+      if (!ec) {
+        log->info("SnapshotLane connect to {0}", endpoint.address().to_string());
+        prepareBuffer();
+        sendMessage();
+      } else if (ec.value() == error::operation_aborted) {
+        return;
+      } else {
+        log->warn("SnapshotLane to {0} closed due to async_connect error {1}",
+          nodeRecord_->Address, ec.message());
+        stop();
+      }
+    });
 }
 
 void SnapshotLane::checkIdle()
 {
-  // TODO:
+  idleTimer_.async_wait(
+    [this, self = shared_from_this()] (error_code ec)
+    {
+      if (stopped_) {
+        return;
+      }
+      if (idleTimer_.expiry() <= steady_timer::clock_type::now()) {
+        // the deadline has passed
+        stop();
+        log->warn("send channel for {0} timed out", nodeRecord_->Key);
+      } else {
+        // the deadline has not passed, wait again
+        checkIdle();
+      }
+    });
 }
 
 void SnapshotLane::stop()
 {
-  // TODO:
+  if (!stopped_) {
+    transport_.SendSnapshotNotification(node_.ClusterID, node_.NodeID, rejected_);
+    stopped_ = true;
+    socket_.close();
+    idleTimer_.cancel();
+  }
 }
 
 } // namespace transport

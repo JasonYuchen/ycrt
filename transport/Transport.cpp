@@ -114,7 +114,7 @@ bool Transport::AsyncSendSnapshot(pbMessageUPtr m)
     handlers_.handleSnapshotStatus(m->cluster_id(), m->to(), true);
     return false;
   }
-  vector<pbSnapshotChunkSPtr> chunks = splitSnapshotMessage(*m);
+  vector<pbSnapshotChunkSPtr> chunks;// TODO = splitSnapshotMessage(*m);
   // TODO: add CircuitBreaker
   if (lanes_ > maxSnapshotLanes_) {
     log->warn("snapshot lane count exceeds maxSnapshotLanes, abort");
@@ -122,7 +122,12 @@ bool Transport::AsyncSendSnapshot(pbMessageUPtr m)
     return false;
   }
   auto lane = make_shared<SnapshotLane>(
-    *this, lanes_, nextIOContext(), sourceAddress_, node);
+    *this,
+    lanes_,
+    nextIOContext(),
+    sourceAddress_,
+    node,
+    NodeInfo{m->cluster_id(), m->to()});
   lane->Start(std::move(chunks));
   return true;
 }
@@ -160,8 +165,8 @@ void Transport::Stop()
 
 void Transport::RemoveSendChannel(const string &key)
 {
-    lock_guard<mutex> guard(mutex_);
-    sendChannels_.erase(key);
+  lock_guard<mutex> guard(mutex_);
+  sendChannels_.erase(key);
 }
 
 Transport::~Transport()
@@ -169,6 +174,14 @@ Transport::~Transport()
   if (!stopped_) {
     Stop();
   }
+}
+
+void Transport::SendSnapshotNotification(
+  uint64_t clusterID,
+  uint64_t nodeID,
+  bool rej)
+{
+  handlers_.handleSnapshotStatus(clusterID, nodeID, rej);
 }
 
 bool Transport::HandleRequest(pbMessageBatchUPtr m)
