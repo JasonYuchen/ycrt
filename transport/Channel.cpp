@@ -546,7 +546,7 @@ void SnapshotLane::checkIdle()
 void SnapshotLane::stop()
 {
   if (!stopped_) {
-    transport_.SendSnapshotNotification(node_.ClusterID, node_.NodeID, rejected_);
+    transport_.SendSnapshotNotification(node_, rejected_);
     stopped_ = true;
     socket_.close();
     idleTimer_.cancel();

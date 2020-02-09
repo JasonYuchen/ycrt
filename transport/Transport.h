@@ -51,7 +51,7 @@ class Transport {
   void RemoveSendChannel(const std::string &key);
 
   // send snapshot notification (succeed or failed), called by SnapshotLane
-  void SendSnapshotNotification(uint64_t clusterID, uint64_t nodeID, bool rej);
+  void SendSnapshotNotification(NodeInfo node, bool reject);
   // receive a normal message, called by RecvChannel
   bool HandleRequest(pbMessageBatchUPtr m);
   // receive a snapshot chunk, called by RecvChannel

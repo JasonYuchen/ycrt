@@ -246,12 +246,9 @@ Transport::~Transport()
   }
 }
 
-void Transport::SendSnapshotNotification(
-  uint64_t clusterID,
-  uint64_t nodeID,
-  bool rej)
+void Transport::SendSnapshotNotification(NodeInfo node, bool reject)
 {
-  handlers_.handleSnapshotStatus(clusterID, nodeID, rej);
+  handlers_.handleSnapshotStatus(node.ClusterID, node.NodeID, reject);
 }
 
 bool Transport::HandleRequest(pbMessageBatchUPtr m)
