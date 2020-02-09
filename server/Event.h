@@ -17,27 +17,27 @@ namespace server
 
 struct LeaderInfo {
   NodeInfo Node;
-  uint64_t Term;
-  uint64_t LeaderID;
+  uint64_t Term = 0;
+  uint64_t LeaderID = 0;
 };
 
 struct CampaignInfo {
   NodeInfo Node;
-  uint64_t Term;
+  uint64_t Term = 0;
 };
 
 struct SnapshotInfo {
   NodeInfo Node;
-  uint64_t From;
-  uint64_t Index;
-  uint64_t Term;
+  uint64_t From = 0;
+  uint64_t Index = 0;
+  uint64_t Term = 0;
 };
 
 struct ReplicationInfo {
   NodeInfo Node;
-  uint64_t From;
-  uint64_t Index;
-  uint64_t Term;
+  uint64_t From = 0;
+  uint64_t Index = 0;
+  uint64_t Term = 0;
 };
 
 struct ProposalInfo {

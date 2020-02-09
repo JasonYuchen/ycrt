@@ -76,81 +76,20 @@ class LogReader {
   LogReader(NodeInfo node, LogDBSPtr logdb);
 
   // assume locked
-  std::string describe() const
-  {
-    return fmt::format(
-      "LogReader[markerIndex={},markerTerm={},length={}] {}",
-      markerIndex_, markerTerm_, length_, nodeDesc_);
-  }
+  std::string describe() const;
 
   // assume locked
-  uint64_t firstIndex() const
-  {
-    return markerIndex_ + 1;
-  }
+  uint64_t firstIndex() const;
 
   // assume locked
-  uint64_t lastIndex() const
-  {
-    return markerIndex_ + length_ - 1;
-  }
+  uint64_t lastIndex() const;
 
   // assume locked
-  StatusWith<uint64_t> term(uint64_t index) const
-  {
-    if (index == markerIndex_) {
-      return markerTerm_;
-    }
-    EntryVector entries;
-    Status s = getEntries(entries, index, index + 1, 0); // maxSize = 0 to ensure only 1 entry
-    if (!s.IsOK()) {
-      return s;
-    }
-    if (entries.empty()) {
-      return 0;
-    } else {
-      return entries[0]->term();
-    }
-  }
+  StatusWith<uint64_t> term(uint64_t index) const;
 
   // assume locked
   Status getEntries(EntryVector &entries,
-    uint64_t low, uint64_t high, uint64_t maxSize) const
-  {
-    if (low <= markerIndex_) {
-      return ErrorCode::LogCompacted;
-    }
-    if (high > lastIndex()+1) {
-      return ErrorCode::LogUnavailable;
-    }
-    uint64_t size = 0;
-    StatusWith<uint64_t> _size = logdb_->GetEntries(
-      entries, node_, low, high, maxSize);
-    if (!_size.IsOK()) {
-      return _size.Code();
-    }
-    size = _size.GetOrDefault(0);
-    if (entries.size() == high - low || size > maxSize) { // at least one entry even size > maxSize
-      return ErrorCode::OK;
-    }
-    if (!entries.empty()) {
-      if (entries.front()->index() > low) {
-        return ErrorCode::LogCompacted;
-      }
-      uint64_t expected = entries.back()->index() + 1;
-      if (lastIndex() <= expected) { // FIXME Is it possible?
-        log->error("{} found log unavailable, "
-                   "low={}, high={}, lastIndex={}, expected={}",
-                   describe(), low, high, lastIndex(), expected);
-        return ErrorCode::LogUnavailable;
-      }
-      log->error("{} found log gap between [{}:{}) at {}",
-                 describe(), low, high, expected); // FIXME Is it a gap?
-      return ErrorCode::LogMismatch;
-    }
-    log->warn("{} failed to get anything from LogDB", describe());
-    return ErrorCode::LogUnavailable;
-  }
+    uint64_t low, uint64_t high, uint64_t maxSize) const;
 
   slogger log;
   std::mutex mutex_;
