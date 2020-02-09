@@ -25,11 +25,6 @@ namespace ycrt
 namespace transport
 {
 
-// TODO: format log output
-// TODO: enable CircuitBreaker
-// TODO: snapshot streaming
-
-// owned by NodeHost
 class Transport {
  public:
   DISALLOW_COPY_AND_ASSIGN(Transport);
@@ -39,14 +34,13 @@ class Transport {
     RaftMessageHandler &handlers,
     server::SnapshotLocator &&locator,
     uint64_t ioContexts);
-  //std::string name();
-  //void setUnmanagedDeploymentID();
-  void SetDeploymentID(uint64_t id) { deploymentID_ = id; }
   uint64_t GetDeploymentID() { return deploymentID_; }
 
   bool AsyncSendMessage(pbMessageUPtr m);
   bool AsyncSendSnapshot(pbMessageUPtr m);
-  //std::shared_ptr<Sink> GetStreamConnection(uint64_t clusterID, uint64_t nodeID);
+  // TODO:
+  //  SNAPSHOT STREAMING
+  //  std::shared_ptr<Sink> GetStreamConnection(uint64_t clusterID, uint64_t nodeID);
   void Stop();
   void RemoveSendChannel(const std::string &key);
 
@@ -72,6 +66,7 @@ class Transport {
   void start();
   boost::asio::io_context &nextIOContext();
 
+  const uint64_t deploymentID_;
   const uint64_t streamConnections_;
   const uint64_t sendQueueLength_;
   const uint64_t getConnectedTimeoutS_;
@@ -93,14 +88,14 @@ class Transport {
   std::atomic_uint64_t ioctxIdx_;
   std::vector<std::unique_ptr<ioctx>> ioctxs_;
   boost::asio::ip::tcp::acceptor acceptor_;
-  uint64_t deploymentID_;
 
   std::mutex mutex_;
   std::unordered_map<std::string, SendChannelSPtr> sendChannels_; // GUARDED BY mutex_;
-  std::unordered_map<std::string, CircuitBreaker> breakers_; // GUARDED BY mutex_;
+  // TODO: enable CircuitBreaker
+  //  std::unordered_map<std::string, CircuitBreaker> breakers_; // GUARDED BY mutex_;
   std::atomic_uint64_t lanes_;
-  // TransportMetrics metrics_;
-  // server::Context serverCtx_;
+  // TODO: enable metrics
+  //  TransportMetrics metrics_;
   std::string sourceAddress_;
   Nodes &resolver_; // owned by NodeHost
   SnapshotChunkManagerUPtr chunkManager_;

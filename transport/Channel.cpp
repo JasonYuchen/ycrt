@@ -16,7 +16,7 @@ namespace ycrt
 namespace transport
 {
 
-// TODO:
+// TODO: move to pbSnapshotChunk
 static StatusWith<string> loadSnapshotChunkData(const pbSnapshotChunk &chunk)
 {
   try {
@@ -29,12 +29,12 @@ static StatusWith<string> loadSnapshotChunkData(const pbSnapshotChunk &chunk)
     return data;
   } catch (Error &e) {
     Log.GetLogger("transport")->error(
-      "failed to load chunk data due to {}", e.what());
+      "loadSnapshotChunkData: failed to load chunk data due to {}", e.what());
     return e.Code();
   }
 }
 
-// FIXME:
+// TODO: move to the settings/Soft.h
 constexpr seconds ResolveDuration(1);
 constexpr seconds ConnectDuration(1);
 constexpr seconds SendDuration(1);
@@ -65,6 +65,7 @@ SendChannel::SendChannel(
 
 void SendChannel::Start()
 {
+  log->info("SendChannel::Start: channel {}", nodeRecord_->Key);
   resolve();
   checkIdle();
 }
@@ -76,7 +77,7 @@ bool SendChannel::AsyncSendMessage(pbMessageUPtr m)
   auto done = bufferQueue_->try_enqueue(std::move(m));
   if (!done) {
     // message dropped due to queue length
-    log->warn("message dropped due to queue size");
+    log->warn("SendChannel::AsyncSendMessage: exceeds queue size, dropped");
     return false;
   } else if (isConnected_ && !inQueue_.exchange(true)) {
     // inQueue to prevent too many pending posted callbacks
@@ -107,27 +108,26 @@ void SendChannel::asyncSendMessage()
   boost::asio::post(io_, [this, self = shared_from_this()](){
     inQueue_ = false;
     // FIXME: fetch all in bufferQueue, 10 ?
-    vector<pbMessageUPtr> items(10);
+    constexpr int batchSize = 10;
+    vector<pbMessageUPtr> items(batchSize);
     while (true) {
       items.clear();
-      auto count = bufferQueue_->try_dequeue_bulk(items.begin(), 10);
+      auto count = bufferQueue_->try_dequeue_bulk(items.begin(), batchSize);
       if (count == 0) {
         return;
       }
-      // put it in output Queue
       bool inProgress = !outputQueue_.empty();
       auto batch = make_unique<raftpb::MessageBatch>();
       batch->set_source_address(sourceAddress_);
       batch->set_deployment_id(transport_.GetDeploymentID());
-      // TODO: MessageBatch rpc bin ver
       for (size_t i = 0; i < count; ++i) {
-        // TODO: use customized serialization, not thread-safe to use move here !!!
+        // FIXME: use customized serialization, not thread-safe to use move here !!!
         batch->mutable_requests()->AddAllocated(items[i].release());
       }
       outputQueue_.push(std::move(batch));
       // do output
       if (!inProgress) {
-        log->debug("SendChannel to {} with next message {}",
+        log->debug("SendChannel::asyncSendMessage: send to {} with message: {}",
           nodeRecord_->Address, outputQueue_.front()->DebugString());
         sendMessage();
       }
@@ -139,7 +139,8 @@ void SendChannel::sendMessage()
 {
   idleTimer_.expires_from_now(SendDuration);
   prepareBuffer();
-  log->debug("SendChannel send {} bytes to {}", buffer_.length(), nodeRecord_->Address);
+  log->debug("SendChannel::sendMessage: send {} bytes to {}",
+    buffer_.length(), nodeRecord_->Address);
   boost::asio::async_write(socket_,
     buffer(buffer_.data(), buffer_.length()),
     [this, self = shared_from_this()](error_code ec, size_t length)
@@ -147,17 +148,16 @@ void SendChannel::sendMessage()
       if (!ec) {
         outputQueue_.pop();
         if (!outputQueue_.empty()) {
-          log->debug("SendChannel to {} with next message {}",
+          log->debug("SendChannel::sendMessage: send to {} with message: {}",
             nodeRecord_->Address, outputQueue_.front()->DebugString());
           sendMessage();
         }
       } else if (ec.value() == error::operation_aborted) {
+        log->debug("SendChannel::sendMessage: operation aborted");
         return;
       } else {
-        // FIXME: do log, nodeInfo_->key ?
-        log->warn("SendChannel to {} closed due to async_write error {}",
-          nodeRecord_->Address, ec.message());
-        transport_.RemoveSendChannel(nodeRecord_->Key);
+        log->warn("SendChannel::sendMessage: async_write error: {}",
+          ec.message());
         stop();
       }
     });
@@ -170,14 +170,15 @@ void SendChannel::resolve()
     [this, self = shared_from_this()]
     (error_code ec, tcp::resolver::results_type it) {
       if (!ec) {
-        log->debug("remote endpoint resolved, connect to {}", it->host_name());
+        log->debug("SendChannel::resolve: {} resolved, connect to {}",
+          nodeRecord_->Address, it->host_name());
         connect(it);
       } else if (ec.value() == error::operation_aborted) {
+        log->debug("SendChannel::resolve: operation aborted");
         return;
       } else {
-        log->warn("SendChannel to {} closed due to async_resolve error {}",
-          nodeRecord_->Address, ec.message());
-        transport_.RemoveSendChannel(nodeRecord_->Key);
+        log->warn("SendChannel::resolve: async_resolve error: {}",
+          ec.message());
         stop();
       }
     });
@@ -191,18 +192,17 @@ void SendChannel::connect(tcp::resolver::results_type endpointIter)
     endpointIter,
     [this, self = shared_from_this()](error_code ec, tcp::endpoint endpoint)
     {
-      log->debug("SendChannel connect to {} returned {}",
-        endpoint.address().to_string(), ec.message());
       if (!ec) {
-        log->info("SendChannel connect to {}", endpoint.address().to_string());
+        log->debug("SendChannel::connect: {} connected",
+          endpoint.address().to_string());
         isConnected_ = true;
         asyncSendMessage();
       } else if (ec.value() == error::operation_aborted) {
+        log->debug("SendChannel::connect: operation aborted");
         return;
       } else {
-        log->warn("SendChannel to {} closed due to async_connect error {}",
-          nodeRecord_->Address, ec.message());
-        transport_.RemoveSendChannel(nodeRecord_->Key);
+        log->warn("SendChannel::connect: async_connect error: {}",
+          ec.message());
         stop();
       }
     });
@@ -217,9 +217,9 @@ void SendChannel::checkIdle()
         return;
       }
       if (idleTimer_.expiry() <= steady_timer::clock_type::now()) {
-        // the deadline has passed
+        log->warn("SendChannel::checkIdle: channel {} timed out",
+          nodeRecord_->Key);
         stop();
-        log->warn("send channel for {} timed out", nodeRecord_->Key);
       } else {
         // the deadline has not passed, wait again
         checkIdle();
@@ -230,6 +230,8 @@ void SendChannel::checkIdle()
 void SendChannel::stop()
 {
   if (!stopped_) {
+    log->info("SendChannel::stop: channel {} closed", nodeRecord_->Key);
+    transport_.RemoveSendChannel(nodeRecord_->Key);
     transport_.HandleUnreachable(nodeRecord_->Address);
     stopped_ = true;
     socket_.close();
@@ -249,6 +251,8 @@ RecvChannel::RecvChannel(Transport &tranport, io_context &io)
 
 void RecvChannel::Start()
 {
+  remoteAddress_ = socket_.remote_endpoint().address().to_string();
+  log->info("RecvChannel::Start: channel {}", remoteAddress_);
   readHeader();
   checkIdle();
 }
@@ -269,14 +273,15 @@ void RecvChannel::readHeader()
         if (decodeHeader()) {
           readPayload();
         } else {
-          log->error("RecvChannel closed due to invalid header");
+          log->error("RecvChannel::readHeader: received invalid header");
           stop();
           return;
         }
       } else if (ec.value() == error::operation_aborted) {
+        log->debug("RecvChannel::readHeader: operation aborted");
         return;
       } else {
-        log->error("RecvChannel closed due to async_read error {}",
+        log->error("RecvChannel::readHeader: async_read error: {}",
           ec.message());
         stop();
         return;
@@ -292,17 +297,16 @@ void RecvChannel::readPayload()
     [this, self = shared_from_this()](error_code ec, size_t length)
     {
       if (!ec) {
-        // FIXME: check crc32
         if (header_.Method == RequestType) {
           auto msg = make_unique<raftpb::MessageBatch>();
           auto done = msg->ParseFromArray(payloadBuf_.data(), header_.Size);
           if (!done) {
-            log->error("RecvChannel closed due to invalid MessageBatch");
+            log->error("RecvChannel::readPayload: received invalid request");
             stop();
             return;
           }
           if (!transport_.HandleRequest(std::move(msg))) {
-            log->error("RecvChannel closed due to request rejected by handler");
+            log->error("RecvChannel::readPayload: request rejected by handler");
             stop();
             return;
           }
@@ -310,26 +314,27 @@ void RecvChannel::readPayload()
           auto msg = make_unique<raftpb::SnapshotChunk>();
           auto done = msg->ParseFromArray(payloadBuf_.data(), header_.Size);
           if (!done) {
-            log->error("RecvChannel closed due to invalid SnapshotChunk");
+            log->error("RecvChannel::readPayload: received invalid chunk");
             stop();
             return;
           }
           if (!transport_.HandleSnapshotChunk(std::move(msg))) {
-            log->error("RecvChannel closed due to chunk rejected by handler");
+            log->error("RecvChannel::readPayload: chunk rejected by handler");
             stop();
             return;
           }
         } else {
-          // should not reach here
-          log->error("RecvChannel closed due to invalid method type");
+          log->error("RecvChannel::readPayload: received invalid message type");
           stop();
           return;
         }
         readHeader();
       } else if (ec.value() == error::operation_aborted) {
+        log->debug("RecvChannel::readPayload: operation aborted");
         return;
       } else {
-        log->error("RecvChannel closed due to error {}", ec.message());
+        log->error("RecvChannel::readPayload: async_read error: {}",
+          ec.message());
         stop();
         return;
       }
@@ -340,17 +345,17 @@ bool RecvChannel::decodeHeader()
 {
   header_ = RequestHeader::Decode(headerBuf_, RequestHeaderSize);
   if (header_.Method != RequestType && header_.Method != SnapshotChunkType) {
-    log->error("invalid method");
+    log->debug("RecvChannel::decodeHeader: invalid method {}", header_.Method);
     return false;
   }
   if (header_.Size == 0) {
-    log->error("invalid payload size");
+    log->debug("RecvChannel::decodeHeader: invalid payload size 0");
     return false;
   }
   if (header_.Size > payloadBuf_.size()) {
     payloadBuf_.resize(header_.Size);
   }
-  // FIXME: check crc32
+  // TODO: check crc32
   return true;
 }
 
@@ -363,9 +368,9 @@ void RecvChannel::checkIdle()
         return;
       }
       if (idleTimer_.expiry() <= steady_timer::clock_type::now()) {
-        // the deadline has passed
+        log->warn("RecvChannel::checkIdle: channel {} timed out",
+          remoteAddress_);
         stop();
-        log->warn("receive channel for {} timed out", socket_.remote_endpoint().address().to_string());
       } else {
         // the deadline has not passed, wait again
         checkIdle();
@@ -376,6 +381,7 @@ void RecvChannel::checkIdle()
 void RecvChannel::stop()
 {
   if (!stopped_) {
+    log->info("RecvChannel::stop: channel {} closed", remoteAddress_);
     stopped_ = true;
     socket_.close();
     idleTimer_.cancel();
@@ -417,6 +423,7 @@ void SnapshotLane::Start(std::vector<pbSnapshotChunkSPtr> &&savedChunks)
     outputQueue_.push(std::move(chunk));
   }
   total_ = id;
+  log->info("SnapshotLane::Start: lane {}", nodeRecord_->Key);
   resolve();
   checkIdle();
 }
@@ -433,11 +440,11 @@ void SnapshotLane::prepareBuffer()
   buffer_.clear();
   buffer_.insert(0, RequestHeaderSize, 0);
   header.Encode(const_cast<char *>(buffer_.data()), RequestHeaderSize);
-  // FIXME: load file chunk to chunk->data
   outputQueue_.front()->set_deployment_id(transport_.GetDeploymentID());
   if (!outputQueue_.front()->witness()) {
     StatusWith<string> data = loadSnapshotChunkData(*outputQueue_.front());
     if (!data.IsOK()) {
+      log->error("SnapshotLane::prepareBuffer: failed to load data from file");
       stop();
       return;
     }
@@ -452,7 +459,8 @@ void SnapshotLane::sendMessage()
 {
   idleTimer_.expires_from_now(SendDuration);
   prepareBuffer();
-  log->info("SnapshotLane is sending chunk {}/{} to {}", outputQueue_.front()->chunk_id() + 1, total_, nodeRecord_->Address);
+  log->debug("SnapshotLane::sendMessage: sending chunk {}/{} to {}",
+    outputQueue_.front()->chunk_id() + 1, total_, nodeRecord_->Address);
   boost::asio::async_write(socket_,
     buffer(buffer_.data(), buffer_.length()),
     [this, self = shared_from_this()](error_code ec, size_t length)
@@ -460,22 +468,22 @@ void SnapshotLane::sendMessage()
       if (!ec) {
         outputQueue_.pop();
         if (!outputQueue_.empty()) {
-          log->debug("SnapshotLane to {} with next message {}",
+          log->debug("SnapshotLane::sendMessage: send to {} with message: {}",
             nodeRecord_->Address, outputQueue_.front()->DebugString());
           sendMessage();
         } else {
-          log->info("SnapshotLane succeeded sending a snapshot with {} chunks"
-                    " to {} {}", total_, nodeRecord_->Address, node_);
+          log->info("SnapshotLane::sendMessage: succeeded sending a snapshot "
+                    "with {} chunks to {} {}",
+                    total_, node_, nodeRecord_->Address);
           rejected_ = false;
           stop();
         }
       } else if (ec.value() == error::operation_aborted) {
+        log->debug("SnapshotLane::sendMessage: operation aborted");
         return;
       } else {
-        // FIXME: do log, nodeInfo_->key ?
-        log->warn("SnapshotLane to {} closed due to async_write error {}",
-          nodeRecord_->Address, ec.message());
-        transport_.RemoveSendChannel(nodeRecord_->Key);
+        log->warn("SnapshotLane::sendMessage: async_write error: {}",
+          ec.message());
         stop();
       }
     });
@@ -488,13 +496,15 @@ void SnapshotLane::resolve()
     [this, self = shared_from_this()]
       (error_code ec, tcp::resolver::results_type it) {
       if (!ec) {
-        log->debug("remote endpoint resolved, connect to {}", it->host_name());
+        log->debug("SnapshotLane::resolve: {} resolved, connect to {}",
+          nodeRecord_->Address, it->host_name());
         connect(it);
       } else if (ec.value() == error::operation_aborted) {
+        log->debug("SnapshotLane::resolve: operation aborted");
         return;
       } else {
-        log->warn("SnapshotLane to {} closed due to async_resolve error {}",
-          nodeRecord_->Address, ec.message());
+        log->warn("SnapshotLane::resolve: async_resolve error: {}",
+          ec.message());
         stop();
       }
     });
@@ -508,17 +518,17 @@ void SnapshotLane::connect(tcp::resolver::results_type endpointIter)
     endpointIter,
     [this, self = shared_from_this()](error_code ec, tcp::endpoint endpoint)
     {
-      log->debug("SnapshotLane connect to {} returned {}",
-        endpoint.address().to_string(), ec.message());
       if (!ec) {
-        log->info("SnapshotLane connect to {}", endpoint.address().to_string());
+        log->debug("SnapshotLane::connect: {} connected",
+          endpoint.address().to_string());
         prepareBuffer();
         sendMessage();
       } else if (ec.value() == error::operation_aborted) {
+        log->debug("SnapshotLane::connect: operation aborted");
         return;
       } else {
-        log->warn("SnapshotLane to {} closed due to async_connect error {}",
-          nodeRecord_->Address, ec.message());
+        log->warn("SnapshotLane::connect: async_connect error: {}",
+          ec.message());
         stop();
       }
     });
@@ -533,9 +543,9 @@ void SnapshotLane::checkIdle()
         return;
       }
       if (idleTimer_.expiry() <= steady_timer::clock_type::now()) {
-        // the deadline has passed
+        log->warn("SnapshotLane::checkIdle: lane {} timed out",
+          nodeRecord_->Key);
         stop();
-        log->warn("send channel for {} timed out", nodeRecord_->Key);
       } else {
         // the deadline has not passed, wait again
         checkIdle();
@@ -546,6 +556,7 @@ void SnapshotLane::checkIdle()
 void SnapshotLane::stop()
 {
   if (!stopped_) {
+    log->info("SnapshotLane::stop: lane {} closed", nodeRecord_->Key);
     transport_.SendSnapshotNotification(node_, rejected_);
     stopped_ = true;
     socket_.close();

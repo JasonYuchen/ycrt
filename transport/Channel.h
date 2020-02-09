@@ -20,6 +20,7 @@ namespace ycrt
 namespace transport
 {
 
+// TODO: move RequestHeader etc to pb/RaftMessage.h
 constexpr uint64_t RequestHeaderSize = 16;
 constexpr uint64_t PayloadBufSize = settings::SnapshotChunkSize + 1024 * 128;
 constexpr uint32_t RequestType = 100;
@@ -49,7 +50,6 @@ static_assert(RequestHeaderSize == sizeof(RequestHeader),
   "RequestHeaderSize != 16");
 
 class Transport;
-// owned by Transport
 class SendChannel : public std::enable_shared_from_this<SendChannel> {
  public:
   explicit SendChannel(
@@ -86,7 +86,6 @@ class SendChannel : public std::enable_shared_from_this<SendChannel> {
 };
 using SendChannelSPtr = std::shared_ptr<SendChannel>;
 
-// owned by Transport
 class RecvChannel : public std::enable_shared_from_this<RecvChannel> {
  public:
   explicit RecvChannel(Transport &tranport, boost::asio::io_context &io);
@@ -101,6 +100,7 @@ class RecvChannel : public std::enable_shared_from_this<RecvChannel> {
   void stop();
   slogger log;
   Transport &transport_;
+  std::string remoteAddress_;
   boost::asio::ip::tcp::socket socket_;
   boost::asio::steady_timer idleTimer_;
   bool stopped_;
@@ -144,6 +144,7 @@ class SnapshotLane : public std::enable_shared_from_this<SnapshotLane> {
   std::queue<pbSnapshotChunkSPtr> outputQueue_;
   std::string buffer_;
 };
+using SnapshotLaneSPtr = std::shared_ptr<SnapshotLane>;
 
 } // namespace transport
 

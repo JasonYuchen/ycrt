@@ -70,6 +70,31 @@ static uint64_t splitBySnapshotFile(
   return chunkCount;
 }
 
+static vector<pbSnapshotChunkSPtr> getWitnessChunks(const pbMessage &m)
+{
+  StatusWith<string> data{ErrorCode::OK}; // TODO: rsm.GetWitnessSnapshot()
+  data.IsOKOrThrow();
+  vector<pbSnapshotChunkSPtr> chunks;
+  auto chunk = make_shared<pbSnapshotChunk>();
+  chunk->set_cluster_id(m.cluster_id());
+  chunk->set_node_id(m.to());
+  chunk->set_from(m.from());
+  chunk->set_file_chunk_id(0);
+  chunk->set_file_chunk_count(1);
+  chunk->set_chunk_id(0);
+  chunk->set_chunk_size(data.GetMutableOrThrow().size());
+  chunk->set_index(m.snapshot().index());
+  chunk->set_term(m.snapshot().term());
+  chunk->set_on_disk_index(0);
+  chunk->set_allocated_membership(new pbMembership(m.snapshot().membership()));
+  chunk->set_filepath("witness.snapshot");
+  chunk->set_file_size(data.GetMutableOrThrow().size());
+  chunk->set_witness(true);
+  chunk->set_data(std::move(data.GetMutableOrThrow()));
+  chunks.emplace_back(std::move(chunk));
+  return chunks;
+}
+
 static vector<pbSnapshotChunkSPtr> getChunks(const pbMessage &m)
 {
   uint64_t startChunkID = 0;
@@ -100,8 +125,7 @@ static vector<pbSnapshotChunkSPtr> getChunks(const pbMessage &m)
 static vector<pbSnapshotChunkSPtr> splitSnapshotMessage(const pbMessage &m)
 {
   if (m.snapshot().witness()) {
-    // TODO: return getWitnessChunks(m);
-    throw Error(ErrorCode::Other, "witness snapshot not supported");
+    return getWitnessChunks(m);
   } else {
     return getChunks(m);
   }
@@ -116,7 +140,7 @@ TransportUPtr Transport::New(
 {
   TransportUPtr t(new Transport(
     nhConfig, resolver, handlers, std::move(locator), ioContexts));
-  t->log->info("start listening on {}", nhConfig.ListenAddress);
+  t->log->info("Transport: start listening on {}", nhConfig.ListenAddress);
   t->start();
   return t;
 }
@@ -127,7 +151,8 @@ Transport::Transport(
   RaftMessageHandler &handlers,
   server::SnapshotLocator &&locator,
   uint64_t ioContexts)
-  : streamConnections_(Soft::ins().StreamConnections),
+  : deploymentID_(nhConfig.DeploymentID),
+    streamConnections_(Soft::ins().StreamConnections),
     sendQueueLength_(Soft::ins().SendQueueLength),
     getConnectedTimeoutS_(Soft::ins().GetConnectedTimeoutS),
     idleTimeoutS_(60), // TODO: add idleTimeoutS to soft?, add idleTimeoutS_ to Asio to handle timeout events
@@ -140,17 +165,14 @@ Transport::Transport(
     ioctxIdx_(0),
     ioctxs_(),
     acceptor_(io_, getEndpoint(string_view(nhConfig.ListenAddress))),
-    deploymentID_(nhConfig.DeploymentID),
     mutex_(),
     sendChannels_(),
-    breakers_(),
     lanes_(0),
     sourceAddress_(nhConfig.RaftAddress),
     resolver_(resolver),
     chunkManager_(SnapshotChunkManager::New(*this, io_, std::move(locator))),
     handlers_(handlers)
 {
-  // TODO: run timer on SnapshotChunkManager
   for (size_t i = 0; i < ioContexts; ++i) {
     ioctxs_.emplace_back(new ioctx());
   }
@@ -161,14 +183,14 @@ bool Transport::AsyncSendMessage(pbMessageUPtr m)
 {
   if (m->type() == raftpb::InstallSnapshot) {
     throw Error(ErrorCode::UnexpectedRaftMessage, log,
-      "Snapshot must be sent via its own channel");
+      "Transport::AsyncSendMessage: snapshot must be sent via its own channel");
   }
   NodeInfo node{m->cluster_id(), m->to()};
   NodesRecordSPtr nodeRecord = resolver_.Resolve(node);
   if (nodeRecord == nullptr) {
-    log->warn(
-      "{} do not have the address for {}, dropping a message",
-      sourceAddress_, node);
+    log->warn("Transport::AsyncSendMessage: "
+              "{} do not have the address for {}, dropping a message",
+              sourceAddress_, node);
     return false;
   }
   SendChannelSPtr ch;
@@ -176,7 +198,7 @@ bool Transport::AsyncSendMessage(pbMessageUPtr m)
     lock_guard<mutex> guard(mutex_);
     auto it = sendChannels_.find(nodeRecord->Key);
     if (it == sendChannels_.end()) {
-      // TODO: add CircuitBreaker
+      // FIXME: add CircuitBreaker
       ch = make_shared<SendChannel>(
         *this, nextIOContext(), sourceAddress_, nodeRecord, sendQueueLength_);
       sendChannels_[nodeRecord->Key] = ch;
@@ -193,31 +215,28 @@ bool Transport::AsyncSendSnapshot(pbMessageUPtr m)
 {
   if (m->type() != raftpb::InstallSnapshot) {
     throw Error(ErrorCode::UnexpectedRaftMessage, log,
-      "Snapshot channel only sends snapshots");
+      "Transport::AsyncSendSnapshot: snapshot channel only sends snapshots");
   }
   NodeInfo node{m->cluster_id(), m->to()};
   NodesRecordSPtr nodeRecord = resolver_.Resolve(node);
   if (nodeRecord == nullptr) {
-    log->warn(
-      "{} do not have the address for {}, dropping a snapshot",
-      sourceAddress_, node);
-    handlers_.handleSnapshotStatus(node, true);
+    log->warn("Transport::AsyncSendSnapshot: "
+              "{} do not have the address for {}, dropping a snapshot",
+              sourceAddress_, node);
+    SendSnapshotNotification(node, true);
     return false;
   }
   vector<pbSnapshotChunkSPtr> chunks = splitSnapshotMessage(*m);
   // TODO: add CircuitBreaker
   if (lanes_ > maxSnapshotLanes_) {
-    log->warn("snapshot lane count exceeds maxSnapshotLanes, abort");
-    handlers_.handleSnapshotStatus(node, true);
+    log->warn("Transport::AsyncSendSnapshot: "
+              "snapshot lane count exceeds maxSnapshotLanes={}, abort",
+              maxSnapshotLanes_);
+    SendSnapshotNotification(node, true);
     return false;
   }
   auto lane = make_shared<SnapshotLane>(
-    *this,
-    lanes_,
-    nextIOContext(),
-    sourceAddress_,
-    nodeRecord,
-    node);
+    *this, lanes_, nextIOContext(), sourceAddress_, nodeRecord, node);
   lane->Start(std::move(chunks));
   return true;
 }
@@ -232,12 +251,14 @@ void Transport::Stop()
     ioctxs_.clear();
     io_.stop();
     main_.join();
+    log->info("Transport::Stop: successful");
   }
 }
 
 void Transport::RemoveSendChannel(const string &key)
 {
   lock_guard<mutex> guard(mutex_);
+  log->debug("Transport::RemoveSendChannel: channel {} removed", key);
   sendChannels_.erase(key);
 }
 
@@ -250,31 +271,30 @@ Transport::~Transport()
 
 void Transport::SendSnapshotNotification(NodeInfo node, bool reject)
 {
+  log->debug("Transport::SendSnapshotNotification: {} reject={}", node, reject);
   handlers_.handleSnapshotStatus(node, reject);
 }
 
 bool Transport::HandleRequest(pbMessageBatchUPtr m)
 {
   if (m->deployment_id() != deploymentID_) {
-    log->warn(
-      "deployment id does not match,"
-      " received {0:d}, actual {1:d}, message dropped",
-      m->deployment_id(), deploymentID_);
+    log->warn("Transport::HandleRequest: deployment id does not match, "
+              "received {}, expected {}, message dropped",
+              m->deployment_id(), deploymentID_);
     return false;
   }
-  // FIXME: Check RPC Bin Ver
   const string &addr = m->source_address();
   if (!addr.empty()) {
     for (auto &req : m->requests()) {
       if (req.from() != 0) {
-        log->info(
-          "new remote address learnt: {} in {}",
+        log->debug("Transport::HandleRequest: new remote address found: {} {}",
           NodeInfo{req.cluster_id(), req.from()}, addr);
         resolver_.AddRemoteAddress(
           NodeInfo{req.cluster_id(), req.from()}, addr);
       }
     }
   }
+  log->debug("Transport::HandleRequest: received from {}", m->source_address());
   handlers_.handleMessageBatch(std::move(m));
   // TODO: metrics
   return true;
@@ -287,6 +307,7 @@ bool Transport::HandleSnapshotChunk(pbSnapshotChunkSPtr m)
 
 bool Transport::HandleSnapshotConfirm(NodeInfo node, uint64_t from)
 {
+  log->debug("Transport::HandleSnapshotConfirm: {} from={}", node, from);
   handlers_.handleSnapshot(node, from);
   return true;
 }
@@ -294,9 +315,11 @@ bool Transport::HandleSnapshotConfirm(NodeInfo node, uint64_t from)
 bool Transport::HandleUnreachable(const std::string &address)
 {
   vector<NodeInfo> remotes = resolver_.ReverseResolve(address);
-  log->info("node {} becomes unreachable, affecting {} raft nodes",
-    address, remotes.size());
+  log->info("Transport::HandleUnreachable: "
+            "{} becomes unreachable, affecting {} raft nodes",
+            address, remotes.size());
   for (auto &node : remotes) {
+    log->debug("Transport::HandleUnreachable: {} becomes unreachable", node);
     handlers_.handleUnreachable(node);
   }
   return true;
@@ -309,12 +332,14 @@ void Transport::start()
     conn->socket(),
     [conn, this](const error_code &ec) mutable {
       if (!ec) {
-        log->info("new connection received from {}", conn->socket().remote_endpoint().address().to_string());
+        log->info("Transport::start: new connection received from {}",
+          conn->socket().remote_endpoint().address().to_string());
         conn->Start();
       } else if (ec.value() == error::operation_aborted) {
+        log->debug("Transport::start: operation aborted");
         return;
       } else {
-        log->warn("async_accept error {}", ec.message());
+        log->warn("Transport::start: async_accept error: {}", ec.message());
       }
       start();
     });
