@@ -37,12 +37,12 @@ inline void CheckEntriesToAppend(
   }
   if (existing.back()->index() + 1 != append.front()->index()) {
     throw Error(ErrorCode::LogMismatch,
-      "found a hold, exist {0}, append {1}",
+      "found a hold, exist {}, append {}",
       existing.back()->index(), append.front()->index());
   }
   if (existing.back()->term() > append.front()->term()) {
     throw Error(ErrorCode::LogMismatch,
-      "unexpected term, ecist {0}, append {1}",
+      "unexpected term, ecist {}, append {}",
       existing.back()->term(), append.front()->term());
   }
 }
@@ -72,8 +72,9 @@ class InMemory {
   {
     if (!entries_.empty()) {
       if (entries_[0]->index() != markerIndex_) {
-        throw Error(ErrorCode::OutOfRange,
-          "InMemory: marker={0}, first={1}", markerIndex_, entries_[0]->index());
+        throw Error(ErrorCode::OutOfRange, log,
+          "InMemory: marker={}, first={}",
+          markerIndex_, entries_[0]->index());
       }
     }
   }
@@ -82,9 +83,9 @@ class InMemory {
   {
     uint64_t upperBound = markerIndex_ + entries_.size();
     if (low > high || low < markerIndex_ || high > upperBound) {
-      throw Error(ErrorCode::OutOfRange,
-        "InMemory: invalid range for entries, low={0}, high={1}, marker={2},"
-        " upperBound={3}", low, high, markerIndex_, upperBound);
+      throw Error(ErrorCode::OutOfRange, log,
+        "InMemory: invalid range for entries, low={}, high={}, marker={},"
+        " upperBound={}", low, high, markerIndex_, upperBound);
     }
   }
 
@@ -155,8 +156,8 @@ class InMemory {
       if (appliedToTerm_ != 0) {
         return appliedToTerm_;
       } else {
-        throw Error(ErrorCode::OutOfRange,
-          "InMemory: appliedToIndex={0}, appliedToTerm={1}",
+        throw Error(ErrorCode::OutOfRange, log,
+          "InMemory: appliedToIndex={}, appliedToTerm={}",
           appliedToIndex_, appliedToTerm_);
       }
     }
@@ -215,7 +216,7 @@ class InMemory {
     if (snapshot_ && snapshot_->index() == index) {
       snapshot_.reset();
     } else if (snapshot_) {
-      log->warn("snapshot index={0} does not match index={1}", snapshot_->index(), index);
+      log->warn("snapshot index={} does not match index={}", snapshot_->index(), index);
     }
   }
 
@@ -232,7 +233,8 @@ class InMemory {
     }
     const pbEntry &lastAppliedEntry = *entries_[index - markerIndex_];
     if (lastAppliedEntry.index() != index) {
-      throw Error(ErrorCode::LogMismatch, "index != last applied entry index");
+      throw Error(ErrorCode::LogMismatch, log,
+        "index != last applied entry index");
     }
     appliedToIndex_ = lastAppliedEntry.index();
     appliedToTerm_ = lastAppliedEntry.term();

@@ -39,22 +39,22 @@ static path getTmpDir(
   uint64_t index,
   uint64_t from)
 {
-  return rootDir / fmt::format("snapshot-{0:020X}-{1}.{2}", index, from, suffix);
+  return rootDir / fmt::format("snapshot-{:020X}-{}.{}", index, from, suffix);
 }
 
 static path getFinalDir(const path &rootDir, uint64_t index)
 {
-  return rootDir / fmt::format("snapshot-{0:020X}", index);
+  return rootDir / fmt::format("snapshot-{:020X}", index);
 }
 
 static path getFileName(uint64_t index)
 {
-  return fmt::format("snapshot-{0:020X}.{1}", index, fileSuffix);
+  return fmt::format("snapshot-{:020X}.{}", index, fileSuffix);
 }
 
 static path getShrunkFileName(uint64_t index)
 {
-  return fmt::format("snapshot-{0:020X}.{1}", index, shrunkSuffix);
+  return fmt::format("snapshot-{:020X}.{}", index, shrunkSuffix);
 }
 
 SnapshotEnv::SnapshotEnv(
@@ -133,7 +133,7 @@ Status SnapshotEnv::createDir(const path &dir, bool must)
   if (!done || ec) {
     if (must) {
       throw Error(ErrorCode::SnapshotEnvError,
-        "failed to create directory={0} with error={1}",
+        "failed to create directory={} with error={}",
         dir.c_str(), ec.message());
     }
     return ErrorCode::SnapshotEnvError;
@@ -152,7 +152,7 @@ Status SnapshotEnv::removeDir(const path &dir, bool must)
   if (ec) {
     if (must) {
       throw Error(ErrorCode::SnapshotEnvError,
-        "failed to remove directory={0} with error={1}",
+        "failed to remove directory={} with error={}",
         dir.c_str(), ec.message());
     }
     return ErrorCode::SnapshotEnvError;

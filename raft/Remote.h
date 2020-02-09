@@ -148,7 +148,7 @@ class Remote {
 
  private:
   template<typename os>
-  friend os &operator<<(os &o, const ycrt::raft::Remote &r);
+  friend os &operator<<(os &o, const Remote &r);
 
   bool active_ = false;
   enum State state_ = Retry;
@@ -167,7 +167,7 @@ inline const char *StateToString(enum Remote::State state)
 
 // for spdlog
 template<typename os>
-os &operator<<(os &o, const ycrt::raft::Remote &r)
+os &operator<<(os &o, const Remote &r)
 {
   return o << "Remote"
     "[Active=" << r.active_ <<

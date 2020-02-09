@@ -6,6 +6,8 @@
 #define YCRT_UTILS_LOGGER_H_
 
 #include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/formatter.h>
+#include <spdlog/fmt/ostr.h>
 #include "utils/Types.h"
 #include "utils/Error.h"
 
@@ -19,9 +21,17 @@ class Logger {
     static Logger logger;
     return logger;
   }
-  std::shared_ptr<spdlog::logger> GetLogger(const char *name) {
+  std::shared_ptr<spdlog::logger> GetLogger(const char *name)
+  {
     assert(loggers_.find(name) != loggers_.end());
     return ins().loggers_[name];
+  }
+  // mainly for testing purpose, should not use in other situation
+  void SetErrorHandler(std::function<void(const std::string &)> &&handler)
+  {
+    for (auto &log:loggers_) {
+      log.second->set_error_handler(handler);
+    }
   }
   // TODO: set pattern, level, sinks, etc...
  private:

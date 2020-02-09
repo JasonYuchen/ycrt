@@ -97,7 +97,7 @@ SnapshotChunkFile::~SnapshotChunkFile()
 {
   if (::close(fd_) < 0) {
     Log.GetLogger("transport")->warn(
-      "failed to close fd={0} in chunk file dtor due to {1}",
+      "failed to close fd={} in chunk file dtor due to {}",
       fd_, strerror(errno));
   }
   if (syncDir_) {
@@ -108,7 +108,7 @@ SnapshotChunkFile::~SnapshotChunkFile()
 // TODO: move to class SnapshotChunk
 static string GetSnapshotKey(const pbSnapshotChunk &chunk)
 {
-  return fmt::format("{0}:{1}:{2}",
+  return fmt::format("{}:{}:{}",
     chunk.cluster_id(), chunk.node_id(), chunk.index());
 }
 
@@ -127,7 +127,7 @@ bool SnapshotChunkManager::AddChunk(pbSnapshotChunkSPtr chunk)
   // TODO: check BinVer
   if (chunk->deployment_id() != transport_.GetDeploymentID()) {
     log->error("SnapshotChunkManager::AddChunk: invalid deploymentID, "
-               "expected={0}, actual={1}",
+               "expected={}, actual={}",
                transport_.GetDeploymentID(), chunk->deployment_id());
     return false;
   }
@@ -146,7 +146,7 @@ bool SnapshotChunkManager::AddChunk(pbSnapshotChunkSPtr chunk)
   if (removed) {
     deleteTempChunkDir(*chunk);
     log->warn("SnapshotChunkManager::AddChunk: "
-              "node removed, ignored chunk, key={0}", snapshotKey);
+              "node removed, ignored chunk, key={}", snapshotKey);
     return false;
   }
   Status saved = saveChunk(*chunk);
@@ -154,10 +154,10 @@ bool SnapshotChunkManager::AddChunk(pbSnapshotChunkSPtr chunk)
     deleteTempChunkDir(*chunk);
     throw Error(saved.Code(), log,
       "SnapshotChunkManager::AddChunk: "
-      "failed to save a chunk, key={0}", snapshotKey);
+      "failed to save a chunk, key={}", snapshotKey);
   }
   if (chunk->chunk_id() + 1 == chunk->chunk_count()) {
-    log->info("last chunk received, key={0}", snapshotKey);
+    log->info("last chunk received, key={}", snapshotKey);
     deleteTrack(snapshotKey); // it is ok to remove tracked_[key] because we hold a sp to current track
     if (validate_) {
       // TODO: validator
@@ -169,16 +169,15 @@ bool SnapshotChunkManager::AddChunk(pbSnapshotChunkSPtr chunk)
       if (finalized.Code() != ErrorCode::SnapshotOutOfDate) {
         throw Error(finalized.Code(), log,
           "SnapshotChunkManager::AddChunk:"
-          "failed to finalize a chunk, key={0}", snapshotKey);
+          "failed to finalize a chunk, key={}", snapshotKey);
       }
       return false;
     }
-    log->info("{0} received snapshot from {1}, index={2}, term={3}",
-      FmtClusterNode(chunk->cluster_id(), chunk->node_id()),
-      chunk->from(), chunk->index(), chunk->term());
+    NodeInfo node{chunk->cluster_id(), chunk->node_id()};
+    log->info("{} received snapshot from {}, index={}, term={}",
+      node, chunk->from(), chunk->index(), chunk->term());
     transport_.HandleRequest(std::move(snapshotMsg));
-    transport_.HandleSnapshotConfirm(
-      chunk->cluster_id(), chunk->node_id(), chunk->from());
+    transport_.HandleSnapshotConfirm(node, chunk->from());
   }
   return true;
 }
@@ -191,9 +190,9 @@ void SnapshotChunkManager::RunTicker()
   {
     if (gcTimer_.expiry() <= steady_timer::clock_type::now()) {
       uint64_t tick = currentTick_.fetch_add(1);
-      log->debug("SnapshotChunkManager Tick at {0}", tick);
+      log->debug("SnapshotChunkManager Tick at {}", tick);
       if (tick % gcTick_ == 0) {
-        log->info("SnapshotChunkManger started gc at tick={0}", tick);
+        log->info("SnapshotChunkManger started gc at tick={}", tick);
         gc();
       }
       RunTicker();
@@ -237,14 +236,14 @@ shared_ptr<SnapshotChunkManager::track> SnapshotChunkManager::onNewChunk(
   lock_guard<mutex> guard(mutex_);
   auto t = tracked_.find(key);
   if (chunk->chunk_id() == 0) {
-    log->info("received the first chunk of a snapshot, key={0}", key);
+    log->info("received the first chunk of a snapshot, key={}", key);
     if (t != tracked_.end()) {
-      log->warn("removing unclaimed chunks, key={0}", key);
+      log->warn("removing unclaimed chunks, key={}", key);
       deleteTempChunkDir(*chunk);
       tracked_.erase(t);
     }
     if (tracked_.size() >= maxConcurrentSlot_) {
-      log->error("max slot count reached, dropped a chunk, key={0}", key);
+      log->error("max slot count reached, dropped a chunk, key={}", key);
       return nullptr;
     }
     // FIXME: auto validator = rsm.NewSnapshotValidator()
@@ -260,17 +259,17 @@ shared_ptr<SnapshotChunkManager::track> SnapshotChunkManager::onNewChunk(
     t = tracked_.find(key);
   } else {
     if (t == tracked_.end()) {
-      log->warn("ignored a not tracked chunk, key={0}, id={1}",
+      log->warn("ignored a not tracked chunk, key={}, id={}",
         key, chunk->chunk_id());
       return nullptr;
     }
     if (t->second->nextChunk != chunk->chunk_id()) {
-      log->warn("ignored an out of order chunk, key={0}, id={1}, expected={2}",
+      log->warn("ignored an out of order chunk, key={}, id={}, expected={}",
         key, chunk->chunk_id(), t->second->nextChunk);
       return nullptr;
     }
     if (t->second->firstChunk->from() != chunk->from()) {
-      log->warn("ignored a chunk, key={0}, from={1}, expected={2}",
+      log->warn("ignored a chunk, key={}, from={}, expected={}",
         key, chunk->from(), t->second->firstChunk->from());
       return nullptr;
     }
@@ -393,7 +392,7 @@ pbMessageBatchUPtr SnapshotChunkManager::toMessageBatch(
   msg->mutable_snapshot()->set_witness(chunk.witness());
   for (auto &file : files) {
     auto *tmp = new pbSnapshotFile(*file);
-    tmp->set_file_path((env.GetFinalDir() / fmt::format("external-file-{0}", file->file_id())).string());
+    tmp->set_file_path((env.GetFinalDir() / fmt::format("external-file-{}", file->file_id())).string());
     msg->mutable_snapshot()->mutable_files()->AddAllocated(tmp);
   }
   return m;

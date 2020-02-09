@@ -129,7 +129,7 @@ class LogEntry {
   Status CheckBound(uint64_t low, uint64_t high) const
   {
     if (low > high) {
-      throw Error(ErrorCode::OutOfRange, "low={0} < high={1}", low, high);
+      throw Error(ErrorCode::OutOfRange, log, "low={} < high={}", low, high);
     }
     auto range = EntryRange();
     if (!range.IsOK()) {
@@ -141,7 +141,7 @@ class LogEntry {
       return ErrorCode::LogCompacted;
     }
     if (high > last + 1) {
-      throw Error(ErrorCode::OutOfRange, "high={0} > last={1}", high, last);
+      throw Error(ErrorCode::OutOfRange, log, "high={} > last={}", high, last);
     }
     return ErrorCode::OK;
   }
@@ -247,7 +247,7 @@ class LogEntry {
       if (conflictIndex <= committed_) {
         throw Error(ErrorCode::LogMismatch, log,
           "try append conflicts with committed entries, "
-          "conflictIndex={0}, committed={1}", conflictIndex, committed_);
+          "conflictIndex={}, committed={}", conflictIndex, committed_);
       }
       // index = m.log_index() = remote.Next-1 (see Raft::makeReplicateMessage)
       Append(entries.SubSpan(conflictIndex - index - 1));
@@ -264,7 +264,7 @@ class LogEntry {
     if (entries[0]->index() <= committed_) {
       throw Error(ErrorCode::LogMismatch, log,
         "append conflicts with committed entries, "
-        "first={0}, committed={1}", entries[0]->index(), committed_);
+        "first={}, committed={}", entries[0]->index(), committed_);
     }
     inMem_.Merge(entries);
   }
@@ -276,7 +276,7 @@ class LogEntry {
     }
     if (index > LastIndex()) {
       throw Error(ErrorCode::OutOfRange, log,
-        "commit to {0}, but last index={1}", index, LastIndex());
+        "commit to {}, but last index={}", index, LastIndex());
     }
     committed_ = index;
   }
@@ -287,8 +287,8 @@ class LogEntry {
     if (uc.Processed > 0) {
       if (uc.Processed < processed_ || uc.Processed > committed_) {
         throw Error(ErrorCode::OutOfRange, log,
-          "invalid UpdateCommit, uc.Processed={0} "
-          "but processed={1}, committed={2}",
+          "invalid UpdateCommit, uc.Processed={} "
+          "but processed={}, committed={}",
           uc.Processed, processed_, committed_);
       }
       processed_ = uc.Processed;
@@ -296,8 +296,8 @@ class LogEntry {
     if (uc.LastApplied > 0) {
       if (uc.LastApplied > processed_ || uc.LastApplied > committed_) {
         throw Error(ErrorCode::OutOfRange, log,
-          "invalid UpdateCommit, uc.LastApplied={0} "
-          "but processed={1}, committed={2}",
+          "invalid UpdateCommit, uc.LastApplied={} "
+          "but processed={}, committed={}",
           uc.LastApplied, processed_, committed_);
       }
       inMem_.AppliedLogTo(uc.LastApplied);

@@ -18,9 +18,8 @@ using namespace std;
 
 Raft::Raft(const Config &config, logdb::LogReaderSPtr logdb)
   : log(Log.GetLogger("raft")),
-    clusterID_(config.ClusterID),
-    nodeID_(config.NodeID),
-    cn_(FmtClusterNode(clusterID_, nodeID_)),
+    node_{config.ClusterID, config.NodeID},
+    nodeDesc_(node_.fmt()),
     leaderID_(NoLeader),
     leaderTransferTargetID_(NoLeader),
     isLeaderTransferTarget_(false),
@@ -90,12 +89,7 @@ Raft::Raft(const Config &config, logdb::LogReaderSPtr logdb)
 
 Raft::Status Raft::GetLocalStatus()
 {
-  return Status{
-    .ClusterID = clusterID_,
-    .NodeID = nodeID_,
-    .LeaderID = leaderID_,
-    .Applied = applied_,
-    .NodeState = state_};
+  return Status{node_, leaderID_, applied_, state_};
 }
 
 void Raft::Handle(pbMessage &m)
@@ -106,7 +100,7 @@ void Raft::Handle(pbMessage &m)
       (this->*handlers_[state_][m.type()])(m);
     }
   } else {
-    log->info("dropped a {0} from {1}, term not matched", m.type(), m.from());
+    log->info("dropped a {} from {}, term not matched", m.type(), m.from());
   }
 }
 
@@ -189,12 +183,12 @@ string Raft::describe() const
   uint64_t lastIndex = logEntry_->LastIndex();
   StatusWith<uint64_t> term = logEntry_->Term(lastIndex);
   if (!term.IsOK()) {
-    log->critical("{0} failed to get term with index={1} due to {2}", cn_, lastIndex, term.Code());
+    log->critical("{} failed to get term with index={} due to {}", nodeDesc_, lastIndex, term.Code());
   }
   return fmt::format(
-    "Raft[first={0},last={1},term={2},commit={3},applied={4}] {5} with term {6}",
+    "Raft[first={},last={},term={},commit={},applied={}] {} with term {}",
     logEntry_->FirstIndex(), lastIndex, term.GetOrDefault(0),
-    logEntry_->Committed(), logEntry_->Processed(), cn_, term_);
+    logEntry_->Committed(), logEntry_->Processed(), nodeDesc_, term_);
 }
 
 pbState Raft::raftState()
@@ -211,7 +205,7 @@ void Raft::loadState(const pbState &state)
   if (state.commit() < logEntry_->Committed()
     || state.commit() > logEntry_->LastIndex()) {
     throw Error(ErrorCode::OutOfRange, log,
-      "loadState: state out of range, commit={0}, range=[{1},{2}]",
+      "loadState: state out of range, commit={}, range=[{},{}]",
       state.commit(), logEntry_->Committed(), logEntry_->LastIndex());
   }
   logEntry_->SetCommitted(state.commit());
@@ -224,8 +218,7 @@ void Raft::setLeaderID(uint64_t leader)
   leaderID_ = leader;
   if (listener_) {
     auto info = server::LeaderInfo{};
-    info.ClusterID = clusterID_;
-    info.NodeID = nodeID_;
+    info.Node = node_;
     info.LeaderID = leaderID_;
     info.Term = term_;
     listener_->LeaderUpdated(info);
@@ -266,7 +259,7 @@ void Raft::mustBeOrThrow(State state)
 {
   if (state_ != state) {
     throw Error(ErrorCode::UnexpectedRaftState, log,
-      "{0} is not a {1}", describe(), StateToString(state));
+      "{} is not a {}", describe(), StateToString(state));
   }
 }
 
@@ -274,7 +267,7 @@ void Raft::mustNotBeOrThrow(State state)
 {
   if (state_ == state) {
     throw Error(ErrorCode::UnexpectedRaftState, log,
-      "{0} is a {1}", describe(), StateToString(state));
+      "{} is a {}", describe(), StateToString(state));
   }
 }
 
@@ -307,7 +300,7 @@ bool Raft::leaderHasQuorum()
 {
   uint64_t count = 0;
   for (auto &node : getVotingMembers()) {
-    if (node.first == nodeID_ || node.second.Active()) {
+    if (node.first == node_.NodeID || node.second.Active()) {
       count++;
       node.second.SetActive(false);
     }
@@ -360,9 +353,9 @@ Remote *Raft::getRemoteByNodeID(uint64_t nodeID, bool must)
     return &witnesses_[nodeID];
   } else if (must) {
     throw Error(ErrorCode::RemoteState, log,
-      "can not determine the Remote by nodeID={0}", nodeID);
+      "can not determine the Remote by nodeID={}", nodeID);
   }
-  log->info("{0}: remote {1} not found", describe(), nodeID);
+  log->info("{}: remote {} not found", describe(), nodeID);
   return nullptr;
 }
 
@@ -390,7 +383,7 @@ void Raft::leaderTick()
     electionTick_ = 0;
     if (checkQuorum_) {
       pbMessage m;
-      m.set_from(nodeID_);
+      m.set_from(node_.NodeID);
       m.set_type(raftpb::CheckQuorum);
       Handle(m);
     }
@@ -402,7 +395,7 @@ void Raft::leaderTick()
   if (timeForHeartbeat()) {
     heartbeatTick_ = 0;
     pbMessage m;
-    m.set_from(nodeID_);
+    m.set_from(node_.NodeID);
     m.set_type(raftpb::LeaderHeartbeat);
     Handle(m);
   }
@@ -419,7 +412,7 @@ void Raft::nonLeaderTick()
   if (!selfRemoved() && timeForElection()) {
     electionTick_ = 0;
     pbMessage m;
-    m.set_from(nodeID_);
+    m.set_from(node_.NodeID);
     m.set_type(raftpb::Election);
     Handle(m);
   }
@@ -473,7 +466,7 @@ void Raft::leaderIsAvailable()
 void Raft::send(pbMessageUPtr m)
 {
   assert(m);
-  m->set_from(nodeID_);
+  m->set_from(node_.NodeID);
   finalizeMessageTerm(*m);
   messages_->emplace_back(std::move(m));
 }
@@ -482,11 +475,11 @@ void Raft::finalizeMessageTerm(pbMessage &m)
 {
   if (m.term() == 0 && m.type() == raftpb::RequestVote) {
     throw Error(ErrorCode::UnexpectedRaftMessage, log,
-      "{0}: sending a RequestVote with 0 term", describe());
+      "{}: sending a RequestVote with 0 term", describe());
   }
   if (m.term() > 0 && m.type() != raftpb::RequestVote) {
     throw Error(ErrorCode::UnexpectedRaftMessage, log,
-      "{0}: term is unexpectedly set for message {1}", describe(), m.DebugString());
+      "{}: term is unexpectedly set for message {}", describe(), m.DebugString());
   }
   if (!isRequestMessage(m.type())) {
     m.set_term(term_);
@@ -502,12 +495,12 @@ void Raft::sendReplicateMessage(uint64_t to)
   auto m = makeReplicateMessage(to, remote->Next(), maxEntrySize_);
   if (m == nullptr) { // log compaction or other error
     if (!remote->Active()) {
-      log->warn("{0}: Remote={1} is not active, skip sending snapshot", describe(), to);
+      log->warn("{}: Remote={} is not active, skip sending snapshot", describe(), to);
       return;
     }
     m = makeInstallSnapshotMessage(to);
     // FIXME: error msg?
-    log->info("{0}: start sending snapshot with index={1} to {2}", describe(), m->snapshot().index(), *remote);
+    log->info("{}: start sending snapshot with index={} to {}", describe(), m->snapshot().index(), *remote);
     remote->BecomeSnapshot(m->snapshot().index());
   } else {
     if (!m->entries().empty()) {
@@ -551,7 +544,7 @@ void Raft::broadcastHeartbeatMessage(pbReadIndexCtx hint)
 {
   auto zeroHint = pbReadIndexCtx{0, 0};
   for (auto &node : getVotingMembers()) {
-    if (node.first != nodeID_) {
+    if (node.first != node_.NodeID) {
       sendHeartbeatMessage(node.first, hint, node.second.Match());
     }
   }
@@ -578,7 +571,7 @@ pbMessageUPtr Raft::makeInstallSnapshotMessage(uint64_t to)
   pbSnapshotSPtr snapshot = logEntry_->GetSnapshot();
   if (snapshot == nullptr) {
     throw Error(ErrorCode::SnapshotUnavailable, log,
-      "{0}: got an empty snapshot", describe());
+      "{}: got an empty snapshot", describe());
   }
   if (witnesses_.find(to) != witnesses_.end()) {
     finalizeWitnessSnapshot(*snapshot);
@@ -609,7 +602,7 @@ pbMessageUPtr Raft::makeReplicateMessage(
     uint64_t expected = entries.size() + next - 1;
     if (lastIndex != expected) {
       throw Error(ErrorCode::LogMismatch, log,
-        "{0}: Replicate expected {1}, actual {2}", describe(), expected, lastIndex);
+        "{}: Replicate expected {}, actual {}", describe(), expected, lastIndex);
     }
   }
   if (witnesses_.find(to) != witnesses_.end()) {
@@ -666,8 +659,7 @@ void Raft::reportDroppedProposal(pbMessage &m)
   }
   if (listener_) {
     auto info = server::ProposalInfo{};
-    info.ClusterID = clusterID_;
-    info.NodeID = nodeID_;
+    info.Node = node_;
     for (auto &entry : m.entries()) {
       info.Entries.emplace_back(entry);
     }
@@ -680,8 +672,7 @@ void Raft::reportDroppedReadIndex(pbMessage &m)
   droppedReadIndexes_->emplace_back(pbReadIndexCtx{m.hint(), m.hint_high()});
   if (listener_) {
     auto info = server::ReadIndexInfo{};
-    info.ClusterID = clusterID_;
-    info.NodeID = nodeID_;
+    info.Node = node_;
     listener_->ReadIndexDropped(info);
   }
 }
@@ -718,7 +709,7 @@ void Raft::appendEntries(Span<pbEntrySPtr> entries)
     entry->set_index(1 + lastIndex++);
   }
   logEntry_->Append(entries);
-  remotes_[nodeID_].TryUpdate(logEntry_->LastIndex());
+  remotes_[node_.NodeID].TryUpdate(logEntry_->LastIndex());
   if (isSingleNodeQuorum()) {
     tryCommit();
   }
@@ -749,7 +740,7 @@ void Raft::resetRemotes()
   for (auto &node : remotes_) {
     node.second = Remote{};
     node.second.SetNext(logEntry_->LastIndex() + 1);
-    if (node.first == nodeID_) {
+    if (node.first == node_.NodeID) {
       node.second.SetMatch(logEntry_->LastIndex());
     }
   }
@@ -760,7 +751,7 @@ void Raft::resetObservers()
   for (auto &node : observers_) {
     node.second = Remote{};
     node.second.SetNext(logEntry_->LastIndex() + 1);
-    if (node.first == nodeID_) {
+    if (node.first == node_.NodeID) {
       node.second.SetMatch(logEntry_->LastIndex());
     }
   }
@@ -771,7 +762,7 @@ void Raft::resetWitnesses()
   for (auto &node : witnesses_) {
     node.second = Remote{};
     node.second.SetNext(logEntry_->LastIndex() + 1);
-    if (node.first == nodeID_) {
+    if (node.first == node_.NodeID) {
       node.second.SetMatch(logEntry_->LastIndex());
     }
   }
@@ -784,7 +775,7 @@ void Raft::becomeObserver(uint64_t term, uint64_t leaderID)
   }
   reset(term);
   setLeaderID(leaderID);
-  log->info("{0}: became an observer", describe());
+  log->info("{}: became an observer", describe());
 }
 
 void Raft::becomeWitness(uint64_t term, uint64_t leaderID)
@@ -794,7 +785,7 @@ void Raft::becomeWitness(uint64_t term, uint64_t leaderID)
   }
   reset(term);
   setLeaderID(leaderID);
-  log->info("{0}: became a witness", describe());
+  log->info("{}: became a witness", describe());
 }
 
 void Raft::becomeFollower(uint64_t term, uint64_t leaderID)
@@ -805,7 +796,7 @@ void Raft::becomeFollower(uint64_t term, uint64_t leaderID)
   state_ = Follower;
   reset(term);
   setLeaderID(leaderID);
-  log->info("{0}: became a follower", describe());
+  log->info("{}: became a follower", describe());
 }
 
 void Raft::becomePreCandidate()
@@ -827,8 +818,8 @@ void Raft::becomeCandidate()
   // prevote?
   reset(term_ + 1);
   setLeaderID(NoLeader);
-  vote_ = nodeID_;
-  log->info("{0}: became a candidate", describe());
+  vote_ = node_.NodeID;
+  log->info("{}: became a candidate", describe());
 }
 
 void Raft::becomeLeader()
@@ -838,31 +829,35 @@ void Raft::becomeLeader()
   }
   state_ = Leader;
   reset(term_);
-  setLeaderID(nodeID_);
+  setLeaderID(node_.NodeID);
   preLeaderPromotionHandleConfigChange();
   EntryVector null{std::make_shared<pbEntry>()};
   null[0]->set_type(raftpb::ApplicationEntry);
   appendEntries({null.data(), null.size()});
-  log->info("{0}: became a leader", describe());
+  log->info("{}: became a leader", describe());
 }
 
 bool Raft::restore(const pbSnapshot &s)
 {
   if (s.index() <= logEntry_->Committed()) {
-    log->info("{0}: snapshot index={1} < committed={2}", describe(), s.index(), logEntry_->Committed());
+    log->info("{}: snapshot index={} < committed={}", describe(), s.index(), logEntry_->Committed());
     return false;
   }
   if (!isObserver()) {
     for (auto &node : s.membership().observers()) {
-      if (node.first == nodeID_) {
-        throw Error(ErrorCode::UnexpectedRaftState, log, "{0}: converting to observer, received snapshot {1}", s.DebugString());
+      if (node.first == node_.NodeID) {
+        throw Error(ErrorCode::UnexpectedRaftState, log,
+          "{}: converting to observer, received snapshot {}",
+          describe(), s.DebugString());
       }
     }
   }
   if (!isWitness()) {
     for (auto &node : s.membership().witnesses()) {
-      if (node.first == nodeID_) {
-        throw Error(ErrorCode::UnexpectedRaftState, log, "{0}: converting to witness, received snapshot {1}", s.DebugString());
+      if (node.first == node_.NodeID) {
+        throw Error(ErrorCode::UnexpectedRaftState, log,
+          "{}: converting to witness, received snapshot {}",
+          describe(), s.DebugString());
       }
     }
   }
@@ -871,7 +866,7 @@ bool Raft::restore(const pbSnapshot &s)
     logEntry_->CommitTo(s.index());
     return false;
   }
-  log->info("{0}: start to restore snapshot with index={1} and term={2}", describe(), s.index(), s.term());
+  log->info("{}: start to restore snapshot with index={} and term={}", describe(), s.index(), s.term());
   logEntry_->Restore(s);
   return true;
 }
@@ -885,18 +880,19 @@ void Raft::restoreRemotes(const pbSnapshot &s)
   remotes_.clear();
   for (auto &node : s.membership().addresses()) {
     // promote observer
-    if (node.first == nodeID_ && isObserver()) {
+    if (node.first == node_.NodeID && isObserver()) {
       becomeFollower(term_, leaderID_);
     }
     if (witnesses_.find(node.first) != witnesses_.end()) {
-      throw Error(ErrorCode::UnexpectedRaftState, "witness should not be promoted to a full member");
+      throw Error(ErrorCode::UnexpectedRaftState, log,
+        "witness should not be promoted to a full member");
     }
     match = 0;
-    if (node.first == nodeID_) {
+    if (node.first == node_.NodeID) {
       match = next - 1;
     }
     setRemote(node.first, match, next);
-    log->info("{0}: remote {1} is restored with {2}", describe(), node.first, remotes_[node.first]);
+    log->info("{}: remote {} is restored with {}", describe(), node.first, remotes_[node.first]);
   }
   if (selfRemoved() && isLeader()) {
     becomeFollower(term_, NoLeader);
@@ -906,39 +902,38 @@ void Raft::restoreRemotes(const pbSnapshot &s)
   observers_.clear();
   for (auto &node : s.membership().observers()) {
     match = 0;
-    if (node.first == nodeID_) {
+    if (node.first == node_.NodeID) {
       match = next - 1;
     }
     setObserver(node.first, match, next);
-    log->info("{0}: observer {1} is restores with {2}", describe(), node.first, observers_[node.first]);
+    log->info("{}: observer {} is restores with {}", describe(), node.first, observers_[node.first]);
   }
 
   // restore witnesses
   witnesses_.clear();
   for (auto &node : s.membership().witnesses()) {
     match = 0;
-    if (node.first == nodeID_) {
+    if (node.first == node_.NodeID) {
       match = next - 1;
     }
     setWitness(node.first, match, next);
-    log->info("{0}: witness {1} is restores with {2}", describe(), node.first, witnesses_[node.first]);
+    log->info("{}: witness {} is restores with {}", describe(), node.first, witnesses_[node.first]);
   }
   resetMatchValueArray();
 }
 
 void Raft::campaign()
 {
-  log->info("{0}: campaign, num of voting members is {1}", describe(), numVotingMembers());
+  log->info("{}: campaign, num of voting members is {}", describe(), numVotingMembers());
   becomeCandidate();
   uint64_t term = term_;
   if (listener_) {
     auto info = server::CampaignInfo{};
-    info.ClusterID = clusterID_;
-    info.NodeID = nodeID_;
+    info.Node = node_;
     info.Term = term;
     listener_->CampaignLaunched(info);
   }
-  handleVoteResp(nodeID_, false);
+  handleVoteResp(node_.NodeID, false);
   if (isSingleNodeQuorum()) {
     becomeLeader();
     return;
@@ -946,11 +941,11 @@ void Raft::campaign()
   uint64_t hint = NoNode;
   // if current node is the target node of the leader transfer
   if (isLeaderTransferTarget_) {
-    hint = nodeID_;
+    hint = node_.NodeID;
     isLeaderTransferTarget_ = false;
   }
   for (auto &node : getVotingMembers()) {
-    if (node.first == nodeID_) {
+    if (node.first == node_.NodeID) {
       continue;
     }
     auto m = make_unique<pbMessage>();
@@ -961,16 +956,16 @@ void Raft::campaign()
     m->set_term(logEntry_->LastTerm());
     m->set_hint(hint);
     send(std::move(m));
-    log->info("{0}: send RequestVote to node {1}", describe(), node.first);
+    log->info("{}: send RequestVote to node {}", describe(), node.first);
   }
 }
 
 uint64_t Raft::handleVoteResp(uint64_t from, bool rejected)
 {
   if (rejected) {
-    log->info("{0}: received RequestVoteResp, rejection from {1} at term {2}", describe(), from, term_);
+    log->info("{}: received RequestVoteResp, rejection from {} at term {}", describe(), from, term_);
   }  else {
-    log->info("{0}: received RequestVoteResp, vote granted from {1} at term {2}", describe(), from, term_);
+    log->info("{}: received RequestVoteResp, vote granted from {} at term {}", describe(), from, term_);
   }
   uint64_t numOfVotesGranted = 0;
   if (votes_.find(from) == votes_.end()) {
@@ -992,19 +987,20 @@ bool Raft::canGrantVote(pbMessage &m)
 bool Raft::selfRemoved()
 {
   if (isObserver()) {
-    return observers_.find(nodeID_) == observers_.end();
+    return observers_.find(node_.NodeID) == observers_.end();
   }
   if (isWitness()) {
-    return witnesses_.find(nodeID_) == witnesses_.end();
+    return witnesses_.find(node_.NodeID) == witnesses_.end();
   }
-  return remotes_.find(nodeID_) == remotes_.end();
+  return remotes_.find(node_.NodeID) == remotes_.end();
 }
 
 void Raft::addNode(uint64_t nodeID)
 {
   pendingConfigChange_ = false;
-  if (nodeID_ == nodeID && isWitness()) {
-    throw Error(ErrorCode::UnexpectedRaftState, "{0}: is a witness and cannot be added", describe());
+  if (node_.NodeID == nodeID && isWitness()) {
+    throw Error(ErrorCode::UnexpectedRaftState, log,
+      "{}: is a witness and cannot be added", describe());
   }
   if (remotes_.find(nodeID) != remotes_.end()) {
     // already
@@ -1014,12 +1010,13 @@ void Raft::addNode(uint64_t nodeID)
     // promotion from observer
     remotes_[nodeID] = observers_[nodeID];
     observers_.erase(nodeID);
-    if (nodeID_ == nodeID) {
+    if (node_.NodeID == nodeID) {
       becomeFollower(term_, leaderID_);
     }
   } else if (witnesses_.find(nodeID) != witnesses_.end()) {
     // promotion from witness is not allowed
-    throw Error(ErrorCode::UnexpectedRaftState, "{0}: could not promote witness", describe());
+    throw Error(ErrorCode::UnexpectedRaftState, log,
+      "{}: could not promote witness", describe());
   } else {
     // normal add new node
     setRemote(nodeID, 0, logEntry_->LastIndex() + 1);
@@ -1029,8 +1026,9 @@ void Raft::addNode(uint64_t nodeID)
 void Raft::addObserver(uint64_t nodeID)
 {
   pendingConfigChange_ = false;
-  if (nodeID_ == nodeID && !isObserver()) {
-    throw Error(ErrorCode::UnexpectedRaftState, "{0}: is not an observer", describe());
+  if (node_.NodeID == nodeID && !isObserver()) {
+    throw Error(ErrorCode::UnexpectedRaftState, log,
+      "{}: is not an observer", describe());
   }
   if (observers_.find(nodeID) != observers_.end()) {
     // already
@@ -1042,8 +1040,9 @@ void Raft::addObserver(uint64_t nodeID)
 void Raft::addWitness(uint64_t nodeID)
 {
   pendingConfigChange_ = false;
-  if (nodeID_ == nodeID && !isWitness()) {
-    throw Error(ErrorCode::UnexpectedRaftState, "{0}: is not a witness", describe());
+  if (node_.NodeID == nodeID && !isWitness()) {
+    throw Error(ErrorCode::UnexpectedRaftState, log,
+      "{}: is not a witness", describe());
   }
   if (witnesses_.find(nodeID) != witnesses_.end()) {
     // already
@@ -1058,7 +1057,7 @@ void Raft::removeNode(uint64_t nodeID)
   remotes_.erase(nodeID);
   observers_.erase(nodeID);
   witnesses_.erase(nodeID);
-  if (nodeID_ == nodeID && isLeader()) {
+  if (node_.NodeID == nodeID && isLeader()) {
     becomeFollower(term_, NoLeader);
   }
   if (isLeaderTransferring() && leaderTransferTargetID_ == nodeID) {
@@ -1074,21 +1073,21 @@ void Raft::removeNode(uint64_t nodeID)
 
 void Raft::setRemote(uint64_t nodeID, uint64_t match, uint64_t next)
 {
-  log->info("{0}: set remote, Node={1}, Match={2}, Next={3}", describe(), nodeID, match, next);
+  log->info("{}: set remote, Node={}, Match={}, Next={}", describe(), nodeID, match, next);
   auto remote = Remote{}.SetMatch(match).SetNext(next);
   remotes_.insert({nodeID, remote});
 }
 
 void Raft::setObserver(uint64_t nodeID, uint64_t match, uint64_t next)
 {
-  log->info("{0}: set observer, Node={1}, Match={2}, Next={3}", describe(), nodeID, match, next);
+  log->info("{}: set observer, Node={}, Match={}, Next={}", describe(), nodeID, match, next);
   auto remote = Remote{}.SetMatch(match).SetNext(next);
   observers_.insert({nodeID, remote});
 }
 
 void Raft::setWitness(uint64_t nodeID, uint64_t match, uint64_t next)
 {
-  log->info("{0}: set witness, Node={1}, Match={2}, Next={3}", describe(), nodeID, match, next);
+  log->info("{}: set witness, Node={}, Match={}, Next={}", describe(), nodeID, match, next);
   auto remote = Remote{}.SetMatch(match).SetNext(next);
   witnesses_.insert({nodeID, remote});
 }
@@ -1115,9 +1114,10 @@ void Raft::preLeaderPromotionHandleConfigChange()
 {
   uint64_t count = getPendingConfigChangeCount();
   if (count > 1) {
-    throw Error(ErrorCode::UnexpectedRaftState, "{0}: multiple pending ConfigChange found", describe());
+    throw Error(ErrorCode::UnexpectedRaftState, log,
+      "{}: multiple pending ConfigChange found", describe());
   } else if (count == 1) {
-    log->info("{0}: becoming leader with pending ConfigChange", describe());
+    log->info("{}: becoming leader with pending ConfigChange", describe());
     pendingConfigChange_ = true;
   }
 }
@@ -1147,22 +1147,21 @@ void Raft::handleHeartbeat(pbMessage &m)
 
 void Raft::handleInstallSnapshot(pbMessage &m)
 {
-  log->info("{0}: InstallSnapshot received from {1}", describe(), m.from());
+  log->info("{}: InstallSnapshot received from {}", describe(), m.from());
   uint64_t index = m.snapshot().index();
   uint64_t term = m.snapshot().term();
   auto resp = make_unique<pbMessage>();
   resp->set_to(m.from());
   resp->set_type(raftpb::ReplicateResp);
   if (restore(m.snapshot())) {
-    log->info("{0}: restored snapshot with index={1} and term={2}", describe(), index, term);
+    log->info("{}: restored snapshot with index={} and term={}", describe(), index, term);
     resp->set_log_index(logEntry_->LastIndex());
   } else {
-    log->info("{0}: rejected snapshot with index={1} and term={2}", describe(), index, term);
+    log->info("{}: rejected snapshot with index={} and term={}", describe(), index, term);
     resp->set_log_index(logEntry_->Committed());
     if (listener_) {
       auto info = server::SnapshotInfo{};
-      info.ClusterID = clusterID_;
-      info.NodeID = nodeID_;
+      info.Node = node_;
       info.Index = index;
       info.Term = term;
       info.From = m.from();
@@ -1193,14 +1192,13 @@ void Raft::handleReplicate(pbMessage &m)
     logEntry_->CommitTo(min(lastIndex, m.commit()));
     resp->set_log_index(lastIndex);
   } else {
-    log->warn("{0}: rejected replicate with index={1} and term={2} from node {3}", describe(), m.log_index(), m.term(), m.from());
+    log->warn("{}: rejected replicate with index={} and term={} from node {}", describe(), m.log_index(), m.term(), m.from());
     resp->set_reject(true);
     resp->set_log_index(m.log_index());
     resp->set_hint(logEntry_->LastIndex());
     if (listener_) {
       auto info = server::ReplicationInfo{};
-      info.ClusterID = clusterID_;
-      info.NodeID = nodeID_;
+      info.Node = node_;
       info.Index = m.log_index();
       info.From = m.from();
       listener_->ReplicationRejected(info);
@@ -1219,11 +1217,12 @@ bool Raft::dropRequestVoteFromHighTermNode(pbMessage &m)
     return false;
   }
   if (m.hint() == m.from()) {
-    log->info("{0}: RequestVote with leader transfer hint received from {1}", describe(), m.from());
+    log->info("{}: RequestVote with leader transfer hint received from {}", describe(), m.from());
     return false;
   }
   if (isLeader() && !quiesce_ && electionTick_ >= electionTimeout_) {
-    throw Error(ErrorCode::UnexpectedRaftState, "{0}: electionTick >= electionTimeout on leader detected", describe());
+    throw Error(ErrorCode::UnexpectedRaftState, log,
+      "{}: electionTick >= electionTimeout on leader detected", describe());
   }
   return leaderID_ != NoLeader && electionTick_ < electionTimeout_;
 }
@@ -1234,11 +1233,11 @@ bool Raft::onMessageTermNotMatched(pbMessage &m)
     return false;
   }
   if (dropRequestVoteFromHighTermNode(m)) {
-    log->info("{0}: dropped a RequestVote from {1} with term {2}", describe(), m.from(), m.term());
+    log->info("{}: dropped a RequestVote from {} with term {}", describe(), m.from(), m.term());
     return true;
   }
   if (m.term() > term_) {
-    log->info("{0}: received a {1} from {2} with higher term={3}", describe(), m.type(), m.from(), m.term());
+    log->info("{}: received a {} from {} with higher term={}", describe(), m.type(), m.from(), m.term());
     uint64_t leaderID = NoLeader;
     if (isLeaderMessage(m.type())) {
       leaderID = m.from();
@@ -1269,7 +1268,7 @@ bool Raft::onMessageTermNotMatched(pbMessage &m)
       resp->set_type(raftpb::NoOP);
       send(std::move(resp));
     } else {
-      log->info("{0}: ignored a {1} from {2} with lower term={3}", describe(), m.type(), m.from(), m.term());
+      log->info("{}: ignored a {} from {} with lower term={}", describe(), m.type(), m.from(), m.term());
     }
     return true;
   }
@@ -1290,19 +1289,18 @@ void Raft::handleElection(pbMessage &m)
     // ignore the Election message when there is membership configure change
     // committed but not applied
     if (hasConfigChangeToApply()) {
-      log->warn("{0}: election skipped due to pending ConfigChange", describe());
+      log->warn("{}: election skipped due to pending ConfigChange", describe());
       if (listener_) {
         auto info = server::CampaignInfo{};
-        info.ClusterID = clusterID_;
-        info.NodeID = nodeID_;
+        info.Node = node_;
         info.Term = term_;
         listener_->CampaignSkipped(info);
       }
     }
-    log->info("{0}: start election at term={1}", describe(), term_);
+    log->info("{}: start election at term={}", describe(), term_);
     campaign();
   } else {
-    log->info("{0}: election ignored at leader node");
+    log->info("{}: election ignored at leader node", describe());
   }
 }
 
@@ -1314,11 +1312,11 @@ void Raft::handleRequestVote(pbMessage &m)
   bool canGrant = canGrantVote(m);
   bool isLogUpToDate = logEntry_->IsUpToDate(m.log_index(), m.log_term());
   if (canGrant && isLogUpToDate) {
-    log->info("{0}: cast vote from {1} with index={2}, term={3} and log term={4}", describe(), m.from(), m.log_index(), m.term(), m.log_term());
+    log->info("{}: cast vote from {} with index={}, term={} and log term={}", describe(), m.from(), m.log_index(), m.term(), m.log_term());
     electionTick_ = 0;
     vote_ = m.from();
   } else {
-    log->info("{0}: rejected vote request from {1} with index={2}, term={3} and log term={4} due to canGrant={5}, upToDate={6}", describe(), m.from(), m.log_index(), m.term(), m.log_term(), canGrant, isLogUpToDate);
+    log->info("{}: rejected vote request from {} with index={}, term={} and log term={} due to canGrant={}, upToDate={}", describe(), m.from(), m.log_index(), m.term(), m.log_term(), canGrant, isLogUpToDate);
     resp->set_reject(true);
   }
   send(std::move(resp));
@@ -1339,7 +1337,8 @@ void Raft::handleConfigChange(pbMessage &m)
       case raftpb::AddObserver: addObserver(nodeID);
       case raftpb::AddWitness: addWitness(nodeID);
       default:
-        throw Error(ErrorCode::UnexpectedRaftMessage, "unexpected ConfigChangeType={0}", changeType);
+        throw Error(ErrorCode::UnexpectedRaftMessage, log,
+          "unexpected ConfigChangeType={}", changeType);
     }
   }
 }
@@ -1362,14 +1361,14 @@ void Raft::handleLeaderPropose(pbMessage &m)
 {
   mustBeOrThrow(Leader);
   if (isLeaderTransferring()) {
-    log->warn("{0}: dropped a proposal, leader transferring", describe());
+    log->warn("{}: dropped a proposal, leader transferring", describe());
     reportDroppedProposal(m);
     return;
   }
   for (auto &entry : *m.mutable_entries()) {
     if (entry.type() == raftpb::ConfigChangeEntry) {
       if (pendingConfigChange_) {
-        log->warn("{0}: dropped an extra ConfigChange", describe());
+        log->warn("{}: dropped an extra ConfigChange", describe());
         reportDroppedConfigChange(std::move(entry));
         entry = pbEntry{};
         entry.set_type(raftpb::ApplicationEntry);
@@ -1396,7 +1395,7 @@ void Raft::handleLeaderCheckQuorum(pbMessage &m)
 {
   mustBeOrThrow(Leader);
   if (!leaderHasQuorum()) {
-    log->warn("{0}: lost quorum", describe());
+    log->warn("{}: lost quorum", describe());
     becomeFollower(term_, NoLeader);
   }
 }
@@ -1404,7 +1403,8 @@ void Raft::handleLeaderCheckQuorum(pbMessage &m)
 bool Raft::hasCommittedEntryAtCurrentTerm()
 {
   if (term_ == 0) {
-    throw Error(ErrorCode::UnexpectedRaftState, "not supposed to reach here");
+    throw Error(ErrorCode::UnexpectedRaftState, log,
+      "not supposed to reach here");
   }
   StatusWith<uint64_t> lastCommittedTerm = logEntry_->Term(logEntry_->Committed());
   if (!lastCommittedTerm.IsOK() && lastCommittedTerm.Code() == ErrorCode::LogCompacted) {
@@ -1418,13 +1418,13 @@ void Raft::handleLeaderReadIndex(pbMessage &m)
   mustBeOrThrow(Leader);
   pbReadIndexCtx ctx{m.hint(), m.hint_high()};
   if (witnesses_.find(m.from()) != witnesses_.end()) {
-    log->error("{0}: dropped ReadIndex from witness {1}", describe(), m.from());
+    log->error("{}: dropped ReadIndex from witness {}", describe(), m.from());
   } else if (!isSingleNodeQuorum()) {
     if (!hasCommittedEntryAtCurrentTerm()) {
       // leader doesn't know the commit value of the cluster
       // see raft thesis section 6.4, this is the first step of the ReadIndex
       // protocol.
-      log->warn("{0}: dropped ReadIndex, leader is not ready", describe());
+      log->warn("{}: dropped ReadIndex, leader is not ready", describe());
       reportDroppedReadIndex(m);
       return;
     }
@@ -1432,7 +1432,7 @@ void Raft::handleLeaderReadIndex(pbMessage &m)
     broadcastHeartbeatMessage(ctx);
   } else {
     readyToRead_->emplace_back(pbReadyToRead{logEntry_->Committed(), ctx});
-    if (m.from() != nodeID_ && observers_.find(m.from()) != observers_.end()) {
+    if (m.from() != node_.NodeID && observers_.find(m.from()) != observers_.end()) {
       auto resp = make_unique<pbMessage>();
       resp->set_to(m.from());
       resp->set_type(raftpb::ReadIndexResp);
@@ -1511,16 +1511,17 @@ void Raft::handleLeaderLeaderTransfer(pbMessage &m)
   }
   // use hint to store the target of the leader transfer request
   uint64_t target = m.hint();
-  log->info("{0}: LeaderTransfer, target={1}", describe(), target);
+  log->info("{}: LeaderTransfer, target={}", describe(), target);
   if (target == NoNode) {
-    throw Error(ErrorCode::UnexpectedRaftMessage, "LeaderTransfer target not set");
+    throw Error(ErrorCode::UnexpectedRaftMessage, log,
+      "LeaderTransfer target not set");
   }
   if (isLeaderTransferring()) {
-    log->warn("{0}: ignored LeaderTransfer, transfer is ongoing", describe());
+    log->warn("{}: ignored LeaderTransfer, transfer is ongoing", describe());
     return;
   }
-  if (nodeID_ == target) {
-    log->warn("{0}: ignored LeaderTransfer, target is itself", describe());
+  if (node_.NodeID == target) {
+    log->warn("{}: ignored LeaderTransfer, target is itself", describe());
     return;
   }
   leaderTransferTargetID_ = target;
@@ -1537,7 +1538,7 @@ void Raft::handleLeaderReadIndexConfirmation(pbMessage &m)
   pbReadIndexCtx ctx{m.hint(), m.hint_high()};
   vector<ReadStatus> readStatus = readIndex_.Confirm(ctx, m.from(), quorum());
   for (auto &s : readStatus) {
-    if (s.From == NoNode || s.From == nodeID_) {
+    if (s.From == NoNode || s.From == node_.NodeID) {
       readyToRead_->emplace_back(pbReadyToRead{s.Index, s.Ctx});
     } else {
       auto resp = make_unique<pbMessage>();
@@ -1562,9 +1563,9 @@ void Raft::handleLeaderSnapshotStatus(pbMessage &m)
   }
   if (m.reject()) {
     remote->ClearPendingSnapshot();
-    log->info("{0}: snapshot failed, remote {1} is now in wait state", describe(), m.from());
+    log->info("{}: snapshot failed, remote {} is now in wait state", describe(), m.from());
   } else {
-    log->info("{0}: snapshot succeeded, remote {1} is now in wait state, next={2}", describe(), m.from(), remote->Next());
+    log->info("{}: snapshot succeeded, remote {} is now in wait state, next={}", describe(), m.from(), remote->Next());
   }
   remote->BecomeWait();
 }
@@ -1574,7 +1575,7 @@ void Raft::handleLeaderUnreachable(pbMessage &m)
   if(!getRemoteByNodeID(m.from(), false)) {
     return;
   }
-  log->info("{0}: received Unreachable, remote {1} entered retry state", describe(), m.from());
+  log->info("{}: received Unreachable, remote {} entered retry state", describe(), m.from());
 }
 
 // FIXME handleLeaderRateLimit
@@ -1630,7 +1631,7 @@ void Raft::handleWitnessInstallSnapshot(pbMessage &m)
 void Raft::handleFollowerPropose(pbMessage &m)
 {
   if (leaderID_ == NoLeader) {
-    log->warn("{0}: dropped proposal as no available leader", describe());
+    log->warn("{}: dropped proposal as no available leader", describe());
     reportDroppedProposal(m);
   } else {
     // FIXME: do not copy
@@ -1657,7 +1658,7 @@ void Raft::handleFollowerHeartbeat(pbMessage &m)
 void Raft::handleFollowerReadIndex(pbMessage &m)
 {
   if (leaderID_ == NoLeader) {
-    log->warn("{0}: dropped ReadIndex as no available leader", describe());
+    log->warn("{}: dropped ReadIndex as no available leader", describe());
     reportDroppedReadIndex(m);
   } else {
     // FIXME: do not copy
@@ -1670,7 +1671,7 @@ void Raft::handleFollowerReadIndex(pbMessage &m)
 void Raft::handleFollowerLeaderTransfer(pbMessage &m)
 {
   if (leaderID_ == NoLeader) {
-    log->warn("{0}: dropped LeadTransfer as no available leader", describe());
+    log->warn("{}: dropped LeadTransfer as no available leader", describe());
   } else {
     // FIXME: do not copy
     auto resp = make_unique<pbMessage>(m);
@@ -1698,7 +1699,7 @@ void Raft::handleFollowerTimeoutNow(pbMessage &m)
 {
   // the last paragraph, p29 of the raft thesis mentions that this is nothing
   // different from the clock moving forward quickly
-  log->info("{0}: TimeoutNow received", describe());
+  log->info("{}: TimeoutNow received", describe());
   electionTick_ = randomizedElectionTimeout_;
   isLeaderTransferTarget_ = true;
   tick();
@@ -1709,7 +1710,7 @@ void Raft::handleFollowerTimeoutNow(pbMessage &m)
 
 void Raft::handleCandidatePropose(pbMessage &m)
 {
-  log->warn("{0}: dropped proposal as no available leader", describe());
+  log->warn("{}: dropped proposal as no available leader", describe());
   reportDroppedProposal(m);
 }
 
@@ -1729,7 +1730,7 @@ void Raft::handleCandidateHeartbeat(pbMessage &m)
 
 void Raft::handleCandidateReadIndex(pbMessage &m)
 {
-  log->warn("{0}: dropped ReadIndex as no available leader", describe());
+  log->warn("{}: dropped ReadIndex as no available leader", describe());
   reportDroppedReadIndex(m);
   droppedReadIndexes_->emplace_back(pbReadIndexCtx{m.hint(), m.hint_high()});
 }
@@ -1744,11 +1745,11 @@ void Raft::handleCandidateInstallSnapshot(pbMessage &m)
 void Raft::handleCandidateRequestVoteResp(pbMessage &m)
 {
   if (observers_.find(m.from()) != observers_.end()) {
-    log->warn("{0}: dropped RequestVoteResp from observer {1}", m.from());
+    log->warn("{}: dropped RequestVoteResp from observer {}", describe(), m.from());
     return;
   }
   uint64_t count = handleVoteResp(m.from(), m.reject());
-  log->info("{0}: received {1} votes and {2} rejections, quorum is {3}", describe(), count, votes_.size() - count, quorum());
+  log->info("{}: received {} votes and {} rejections, quorum is {}", describe(), count, votes_.size() - count, quorum());
   // 3rd paragraph section 5.2 of the raft paper
   if (count == quorum()) {
     becomeLeader();

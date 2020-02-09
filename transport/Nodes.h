@@ -10,7 +10,6 @@
 #include <string>
 #include <string_view>
 #include <boost/asio.hpp>
-#include "ycrt/Config.h"
 #include "utils/Utils.h"
 #include "pb/RaftMessage.h"
 
@@ -34,12 +33,11 @@ class Nodes {
     std::string Address; // address + port
     uint32_t Port;
   };
-  void AddRemoteAddress(
-    uint64_t clusterID, uint64_t nodeID, const std::string &address);
-  std::shared_ptr<Record> Resolve(uint64_t clusterID, uint64_t nodeID);
+  void AddRemoteAddress(NodeInfo node, const std::string &address);
+  std::shared_ptr<Record> Resolve(NodeInfo node);
   std::vector<NodeInfo> ReverseResolve(const std::string &address);
-  void AddNode(uint64_t clusterID, uint64_t nodeID, const std::string &address);
-  void RemoveNode(uint64_t clusterID, uint64_t nodeID);
+  void AddNode(NodeInfo node, const std::string &address);
+  void RemoveNode(NodeInfo node);
   void RemoveCluster(uint64_t clusterID);
   void RemoveAllPeers();
  private:
@@ -62,20 +60,20 @@ class RaftMessageHandler {
  public:
   std::pair<uint64_t, uint64_t> handleMessageBatch(pbMessageBatchUPtr batch)
   {
-    Log.GetLogger("transport")->info("handleMessageBatch received: {0}", batch->DebugString());
+    Log.GetLogger("transport")->info("handleMessageBatch received: {}", batch->DebugString());
     return {0, 0};
   }
-  void handleUnreachable(uint64_t clusterID, uint64_t nodeID)
+  void handleUnreachable(NodeInfo node)
   {
-    Log.GetLogger("transport")->info("handleUnreachable received: {0:d}:{1:d}", clusterID, nodeID);
+    Log.GetLogger("transport")->info("handleUnreachable received: {}", node);
   }
-  void handleSnapshotStatus(uint64_t clusterID, uint64_t nodeID, bool rejected)
+  void handleSnapshotStatus(NodeInfo node, bool rejected)
   {
-    Log.GetLogger("transport")->info("handleSnapshotStatus received: {0:d}:{1:d} {2}", clusterID, nodeID, rejected);
+    Log.GetLogger("transport")->info("handleSnapshotStatus received: {} {}", node, rejected);
   }
-  void handleSnapshot(uint64_t clusterID, uint64_t nodeID, uint64_t from)
+  void handleSnapshot(NodeInfo node, uint64_t from)
   {
-    Log.GetLogger("transport")->info("handleSnapshot received: {0:d}:{1:d} from {2}", clusterID, nodeID, from);
+    Log.GetLogger("transport")->info("handleSnapshot received: {} from {}", node, from);
   }
  private:
 };

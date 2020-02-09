@@ -7,7 +7,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
 
 aux_source_directory(${PROJECT_SOURCE_DIR}/logdb SOURCE)
 aux_source_directory(${PROJECT_SOURCE_DIR}/pb SOURCE)
-#aux_source_directory(${PROJECT_SOURCE_DIR}/playground SOURCE)
+aux_source_directory(${PROJECT_SOURCE_DIR}/playground SOURCE)
 aux_source_directory(${PROJECT_SOURCE_DIR}/raft SOURCE)
 aux_source_directory(${PROJECT_SOURCE_DIR}/server SOURCE)
 aux_source_directory(${PROJECT_SOURCE_DIR}/settings SOURCE)

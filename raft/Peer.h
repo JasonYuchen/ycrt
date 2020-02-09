@@ -74,7 +74,7 @@ class Peer {
   {
     pbMessage m;
     m.set_type(raftpb::LeaderTransfer);
-    m.set_to(raft_->nodeID_);
+    m.set_to(raft_->node_.NodeID);
     m.set_from(target);
     m.set_hint(target);
     raft_->Handle(m);
@@ -85,7 +85,7 @@ class Peer {
   {
     pbMessage m;
     m.set_type(raftpb::Propose);
-    m.set_from(raft_->nodeID_);
+    m.set_from(raft_->node_.NodeID);
     // FIXME: ents
     for (auto &ent : ents) {
       m.mutable_entries()->Add(std::move(ent));
@@ -98,7 +98,8 @@ class Peer {
   {
     std::string config;
     if (!configChange.SerializeToString(&config)) {
-      throw Error(ErrorCode::UnexpectedRaftMessage, "invalid config change");
+      throw Error(ErrorCode::UnexpectedRaftMessage, log,
+        "invalid config change");
     }
     pbMessage m;
     m.set_type(raftpb::Propose);
@@ -278,8 +279,8 @@ class Peer {
     } else {
       prevState_ = raft_->raftState();
     }
-    log->info("Peer {0} launched, initial={1}, newNode={2}",
-      raft_->cn_, initial, newNode);
+    log->info("Peer {} launched, initial={}, newNode={}",
+      raft_->nodeDesc_, initial, newNode);
   }
 
   static void checkLaunchRequest(
@@ -309,8 +310,8 @@ class Peer {
     std::string config;
     ents.reserve(peers.size());
     for (auto &peer : peers) {
-      log->info("{0}: inserting a bootstrap ConfigChange AddNode, "
-                "Node={1}, Address={2}",
+      log->info("{}: inserting a bootstrap ConfigChange AddNode, "
+                "Node={}, Address={}",
                 raft_->describe(), peer.NodeID, peer.Address);
       pbConfigChange cc;
       cc.set_type(raftpb::AddNode);
@@ -337,8 +338,8 @@ class Peer {
   pbUpdate getUpdate(bool moreEntriesToApply, uint64_t lastApplied) const
   {
     pbUpdate ud;
-    ud.ClusterID = raft_->clusterID_;
-    ud.NodeID = raft_->nodeID_;
+    ud.ClusterID = raft_->node_.ClusterID;
+    ud.NodeID = raft_->node_.NodeID;
     ud.EntriesToSave = raft_->logEntry_->GetEntriesToSave();
     ud.Messages = raft_->messages_; // FIXME
     ud.LastApplied = lastApplied;
@@ -385,7 +386,7 @@ class Peer {
       uint64_t lastIndex = ud.CommittedEntries.back()->index();
       if (lastIndex > ud.State.commit()) {
         throw Error(ErrorCode::InvalidUpdate, log,
-          "try to apply not committed entry: commit={0} < last={1}",
+          "try to apply not committed entry: commit={} < last={}",
           ud.State.commit(), lastIndex);
       }
     }
@@ -394,7 +395,7 @@ class Peer {
       uint64_t lastSave = ud.EntriesToSave.back()->index();
       if (lastApply > lastSave) {
         throw Error(ErrorCode::InvalidUpdate, log,
-          "try to apply not saved entry: save={0} < apply={1}",
+          "try to apply not saved entry: save={} < apply={}",
           lastSave, lastApply);
       }
     }

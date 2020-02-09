@@ -21,7 +21,7 @@ TEST(Transport, Client)
   nhConfig1.ListenAddress = "127.0.0.1:9009";
   auto handler = RaftMessageHandler();
   auto resolver1 = Nodes::New([](uint64_t){return 0;});
-  resolver1->AddNode(1, 2, "127.0.0.1:9090");
+  resolver1->AddNode(NodeInfo{1, 2}, "127.0.0.1:9090");
   auto transport1 = Transport::New(nhConfig1, *resolver1, handler, [](uint64_t,uint64_t){return "no";}, 1);
 
   auto nhConfig2 = NodeHostConfig();
@@ -73,7 +73,7 @@ TEST(Transport, AsyncSendSnapshotWith1Chunks)
   s.IsOKOrThrow();
   auto handler = RaftMessageHandler();
   auto resolver1 = Nodes::New([](uint64_t){return 0;});
-  resolver1->AddNode(1, 2, "127.0.0.1:9090");
+  resolver1->AddNode(NodeInfo{1, 2}, "127.0.0.1:9090");
   auto transport1 = Transport::New(nhConfig1, *resolver1, handler, locator1, 1);
 
   auto nhConfig2 = NodeHostConfig();
@@ -129,7 +129,7 @@ TEST(Transport, AsyncSendSnapshotWith2Chunks)
   s.IsOKOrThrow();
   auto handler = RaftMessageHandler();
   auto resolver1 = Nodes::New([](uint64_t){return 0;});
-  resolver1->AddNode(1, 2, "127.0.0.1:9090");
+  resolver1->AddNode(NodeInfo{1, 2}, "127.0.0.1:9090");
   auto transport1 = Transport::New(nhConfig1, *resolver1, handler, locator1, 1);
 
   auto nhConfig2 = NodeHostConfig();
@@ -169,6 +169,10 @@ TEST(Transport, AsyncSendSnapshotWith2Chunks)
 
 TEST(Transport, SnapshotChunkManagerGC)
 {
+  Log.SetErrorHandler([](const std::string &msg){
+    std::cerr << "msg" << std::endl;
+    std::abort();
+  });
   Log.GetLogger("transport")->set_level(spdlog::level::debug);
   auto locator = [](uint64_t,uint64_t){return "test_snap_dir_2";};
   boost::asio::io_service io;
@@ -177,8 +181,10 @@ TEST(Transport, SnapshotChunkManagerGC)
   int t;
   auto manager = SnapshotChunkManager::New((Transport&)(t), io, locator);
   manager->RunTicker();
-  std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+  std::this_thread::sleep_for(std::chrono::milliseconds(3000));
   io.stop();
   thread.join();
-  Log.GetLogger("transport")->info("release...");
+  Log.GetLogger("transport")->info("release... {}");
+  Log.GetLogger("transport")->info("release... {} {}", "ok");
+  Log.GetLogger("transport")->info("release... ", "ok");
 }

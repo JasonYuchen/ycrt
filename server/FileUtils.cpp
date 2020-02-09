@@ -19,7 +19,7 @@ static const char *deletedFlagFile = "DELETED";
 
 //void logErrno(const char *desc)
 //{
-//  Log.GetLogger("server")->error("{0}: {1}", desc, strerror(errno));
+//  Log.GetLogger("server")->error("{}: {}", desc, strerror(errno));
 //}
 
 Status SyncFd(int fd)

@@ -66,7 +66,7 @@ class SnapshotChunkManager {
   SnapshotChunkManager(
     Transport &transport_,
     boost::asio::io_context &io_,
-    std::function<std::string(uint64_t, uint64_t)> &&getSnapshotDir);
+    server::SnapshotLocator &&locator);
   std::shared_ptr<std::mutex> getSnapshotLock(const std::string &key);
   std::shared_ptr<track> onNewChunk(const std::string &key, pbSnapshotChunkSPtr chunk);
   void gc();
@@ -90,7 +90,7 @@ class SnapshotChunkManager {
   boost::asio::steady_timer gcTimer_;
   std::atomic_uint64_t currentTick_;
   bool validate_;
-  std::function<std::string(uint64_t, uint64_t)> snapshotLocator_;
+  server::SnapshotLocator snapshotLocator_;
   std::mutex mutex_;
   std::unordered_map<std::string, std::shared_ptr<track>> tracked_; // guarded by mutex_, tracked_[key] is guarded by locks_[key]
   std::unordered_map<std::string, std::shared_ptr<std::mutex>> locks_; // guarded by mutex_

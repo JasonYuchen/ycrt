@@ -35,8 +35,7 @@ class Raft {
     Follower = 0, PreCandidate, Candidate, Leader, Observer, Witness, NumOfState
   };
   struct Status {
-    uint64_t ClusterID;
-    uint64_t NodeID;
+    NodeInfo Node;
     uint64_t LeaderID;
     uint64_t Applied;
     State NodeState;
@@ -212,9 +211,8 @@ class Raft {
   static bool isResponseMessage(pbMessageType type);
 
   slogger log;
-  uint64_t clusterID_;
-  uint64_t nodeID_;
-  const std::string cn_;
+  NodeInfo node_;
+  const std::string nodeDesc_;
   uint64_t leaderID_;
   uint64_t leaderTransferTargetID_;
   bool isLeaderTransferTarget_;

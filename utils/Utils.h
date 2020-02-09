@@ -190,11 +190,38 @@ class Stopper {
   std::vector<std::thread> workers_;
 };
 
-// for output purpose, [clusterID_:nodeID_], e.g. [00001:00005]
-inline std::string FmtClusterNode(uint64_t clusterID, uint64_t nodeID)
+struct NodeInfo {
+  uint64_t ClusterID = 0;
+  uint64_t NodeID = 0;
+  // for output purpose, [clusterID_:nodeID_], e.g. [00001:00005]
+  bool Valid() const {
+    return ClusterID && NodeID;
+  }
+  std::string fmt() const
+  {
+    return fmt::format("[{0:05d}:{1:05d}]", ClusterID, NodeID);
+  }
+};
+
+template<typename os>
+os &operator<<(os &o, const NodeInfo &n)
 {
-  return fmt::format("[{0:05d}:{1:05d}]", clusterID, nodeID);
+  return o << fmt::format("[{0:05d}:{1:05d}]", n.ClusterID, n.NodeID);
 }
+
+inline bool operator==(const NodeInfo &lhs, const NodeInfo &rhs)
+{
+  return lhs.NodeID == rhs.NodeID && lhs.ClusterID == rhs.ClusterID;
+}
+
+struct NodeInfoHash {
+  size_t operator()(const NodeInfo& rhs) const {
+    return std::hash<uint64_t>()(rhs.ClusterID)
+      ^ std::hash<uint64_t>()(rhs.NodeID);
+  }
+};
+
+// for spdlog
 
 } // namespace ycrt
 

@@ -6,6 +6,7 @@
 #define YCRT_SERVER_EVENT_H_
 
 #include <memory>
+#include "utils/Utils.h"
 #include "pb/RaftMessage.h"
 
 namespace ycrt
@@ -15,44 +16,37 @@ namespace server
 {
 
 struct LeaderInfo {
-  uint64_t ClusterID;
-  uint64_t NodeID;
+  NodeInfo Node;
   uint64_t Term;
   uint64_t LeaderID;
 };
 
 struct CampaignInfo {
-  uint64_t ClusterID;
-  uint64_t NodeID;
-  bool PreVote;
+  NodeInfo Node;
   uint64_t Term;
 };
 
 struct SnapshotInfo {
-  uint64_t ClusterID;
-  uint64_t NodeID;
+  NodeInfo Node;
   uint64_t From;
   uint64_t Index;
   uint64_t Term;
 };
 
 struct ReplicationInfo {
-  uint64_t ClusterID;
-  uint64_t NodeID;
+  NodeInfo Node;
   uint64_t From;
   uint64_t Index;
   uint64_t Term;
 };
 
 struct ProposalInfo {
-  uint64_t ClusterID;
-  uint64_t NodeID;
+  NodeInfo Node;
   std::vector<pbEntry> Entries;
 };
 
 struct ReadIndexInfo {
-  uint64_t ClusterID;
-  uint64_t NodeID;
+  NodeInfo Node;
 };
 
 class RaftEventListener {

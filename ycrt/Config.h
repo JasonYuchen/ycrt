@@ -8,6 +8,8 @@
 #include <stdint.h>
 #include <functional>
 #include "pb/raft.pb.h"
+#include "utils/Utils.h"
+#include "server/Event.h"
 
 namespace ycrt
 {
@@ -21,29 +23,7 @@ constexpr uint64_t NoLeader = 0;
 constexpr uint64_t NoNode = 0;
 constexpr uint64_t NoLimit = UINT64_MAX;
 
-struct LeaderInfo {
-  uint64_t ClusterID;
-  uint64_t NodeID;
-  uint64_t Term;
-  uint64_t LeaderID;
-};
-
-struct NodeInfo {
-  uint64_t ClusterID;
-  uint64_t NodeID;
-};
-
-inline bool operator==(const NodeInfo &lhs, const NodeInfo &rhs)
-{
-  return lhs.NodeID == rhs.NodeID && lhs.ClusterID == rhs.ClusterID;
-}
-
-struct NodeInfoHash {
-  size_t operator()(const NodeInfo& rhs) const {
-    return std::hash<uint64_t>()(rhs.ClusterID)
-      ^ std::hash<uint64_t>()(rhs.NodeID);
-  }
-};
+using server::LeaderInfo;
 
 struct Config {
   // NodeID is a non-zero value used to identify a node within a Raft cluster.
