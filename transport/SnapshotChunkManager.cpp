@@ -190,9 +190,9 @@ void SnapshotChunkManager::RunTicker()
   {
     if (gcTimer_.expiry() <= steady_timer::clock_type::now()) {
       uint64_t tick = currentTick_.fetch_add(1);
-      log->debug("SnapshotChunkManager Tick at {}", tick);
+      log->debug("SnapshotChunkManager: tick={}", tick);
       if (tick % gcTick_ == 0) {
-        log->info("SnapshotChunkManger started gc at tick={}", tick);
+        log->info("SnapshotChunkManger: gc at tick={}", tick);
         gc();
       }
       RunTicker();

@@ -86,8 +86,6 @@ StatusWith<bool> IsDirMarkedAsDeleted(const path &dir)
   }
 }
 
-
-// TODO: use C functions
 Status CreateFlagFile(const path &filePath, string_view content)
 {
   int fd = ::open(filePath.c_str(), O_RDWR | O_CREAT | O_TRUNC | O_CLOEXEC);
@@ -125,7 +123,6 @@ Status RemoveFlagFile(const path &filePath)
   return ErrorCode::OK;
 }
 
-// TODO: use C functions
 StatusWith<string> GetFlagFileContent(const path &filePath)
 {
   int fd = ::open(filePath.c_str(), O_RDONLY | O_CLOEXEC);

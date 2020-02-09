@@ -25,7 +25,7 @@ namespace transport
 // {snapshot} - split, send (managed by Transport) ->
 // {chunk1 chunk2 ...} - receive, merge (managed by SnapshotChunkFile) ->
 // {snapshot}
-// TODO: consider throw instead of Status
+// FIXME: consider throw instead of Status
 class SnapshotChunkFile {
  public:
   enum Mode { CREATE, READ, APPEND };
@@ -49,7 +49,6 @@ class SnapshotChunkManager {
     Transport &transport,
     boost::asio::io_context &io,
     server::SnapshotLocator &&locator);
-
   // AddChunk adds a received trunk to chunks
   bool AddChunk(pbSnapshotChunkSPtr chunk);
   // RunTicker runs a timer with 1 seconds interval to trigger gc
@@ -62,13 +61,13 @@ class SnapshotChunkManager {
     uint64_t nextChunk;
     uint64_t tick;
   };
-
   SnapshotChunkManager(
     Transport &transport_,
     boost::asio::io_context &io_,
     server::SnapshotLocator &&locator);
   std::shared_ptr<std::mutex> getSnapshotLock(const std::string &key);
-  std::shared_ptr<track> onNewChunk(const std::string &key, pbSnapshotChunkSPtr chunk);
+  std::shared_ptr<track> onNewChunk(
+    const std::string &key, pbSnapshotChunkSPtr chunk);
   void gc();
   void deleteTrack(const std::string &key);
   // TODO: move to the class SnapshotChunk
@@ -81,6 +80,7 @@ class SnapshotChunkManager {
   pbMessageBatchUPtr toMessageBatch(
     const pbSnapshotChunk &chunk,
     const std::vector<pbSnapshotFileSPtr> &files) const;
+
   const uint64_t timeoutTick_;
   const uint64_t gcTick_;
   const uint64_t maxConcurrentSlot_;
