@@ -40,7 +40,7 @@ InMemory::InMemory(uint64_t lastIndex)
     savedTo_(lastIndex)
 {}
 
-inline uint64_t InMemory::GetMarkerIndex() const
+uint64_t InMemory::GetMarkerIndex() const
 {
   return markerIndex_;
 }
@@ -63,7 +63,7 @@ inline void InMemory::CheckBound(uint64_t low, uint64_t high) const
   }
 }
 
-inline size_t InMemory::GetEntriesSize() const
+size_t InMemory::GetEntriesSize() const
 {
   return entries_.size();
 }
@@ -101,12 +101,12 @@ void InMemory::GetEntries(
   entries.insert(entries.end(), st, ed);
 }
 
-inline bool InMemory::HasSnapshot() const
+bool InMemory::HasSnapshot() const
 {
   return snapshot_ != nullptr;
 }
 
-inline pbSnapshotSPtr InMemory::GetSnapshot() const
+pbSnapshotSPtr InMemory::GetSnapshot() const
 {
   return snapshot_;
 }
@@ -225,7 +225,7 @@ void InMemory::AppliedLogTo(uint64_t index)
   // FIXME: rate limit
 }
 
-inline void InMemory::Resize()
+void InMemory::Resize()
 {
   shrunk_ = false;
   if (entries_.size() > entrySliceSize_) {
@@ -235,14 +235,14 @@ inline void InMemory::Resize()
   }
 }
 
-inline void InMemory::TryResize()
+void InMemory::TryResize()
 {
   if (shrunk_) {
     Resize();
   }
 }
 
-inline void InMemory::ResizeEntrySlice()
+void InMemory::ResizeEntrySlice()
 {
   bool toResize =
     (entries_.capacity() - entries_.size()) > minEntrySliceFreeSize_;

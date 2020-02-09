@@ -17,8 +17,7 @@
 #include <spdlog/fmt/fmt.h>
 #include "utils/Types.h"
 
-// TODO:
-//  https://github.com/fraillt/cpp_serializers_benchmark
+// https://github.com/fraillt/cpp_serializers_benchmark
 
 namespace ycrt
 {

@@ -867,7 +867,7 @@ bool Raft::restore(const pbSnapshot &s)
     return false;
   }
   log->info("{}: start to restore snapshot with index={} and term={}", describe(), s.index(), s.term());
-  logEntry_->Restore(s);
+  logEntry_->Restore(make_shared<pbSnapshot>(s));
   return true;
 }
 
@@ -1462,8 +1462,9 @@ void Raft::handleLeaderReplicateResp(pbMessage &m)
       } else if (paused) {
         sendReplicateMessage(m.from());
       }
-      // TODO: TO READ: according to the leadership transfer protocol listed on the p29 of the
-      //  raft thesis
+      // TODO:
+      //  TO READ: according to the leadership transfer protocol listed on the
+      //  p29 of the raft thesis
       if (isLeaderTransferring() &&
         m.from() == leaderTransferTargetID_ &&
         logEntry_->LastIndex() == remote->Match()) {

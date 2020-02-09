@@ -19,384 +19,49 @@ namespace ycrt
 namespace raft
 {
 
-// ILogDB is a read-only interface to the underlying persistent storage to
-// allow the raft package to access raft state, entries, snapshots stored in
-// the persistent storage. Entries stored in the persistent storage accessible
-// via ILogDB is usually not required in normal cases.
-//class LogDB {
-// public:
-//  std::pair<uint64_t, uint64_t> Range() const;
-//  void SetRange(uint64_t index, uint64_t length);
-//  std::pair<pbStateSPtr, pbMembershipSPtr> NodeState() const;
-//  void SetNodeState(pbStateSPtr);
-//  Status CreateSnapshot(pbSnapshotUPtr);
-//  Status ApplySnapshot(pbSnapshotUPtr);
-//  StatusWith<uint64_t> Term(uint64_t index) const;
-//  Status GetEntries(std::vector<pbEntry> &entries,
-//    uint64_t low, uint64_t high, uint64_t maxSize);
-//  pbSnapshotSPtr Snapshot();
-//  Status Compact(uint64_t index);
-//  Status Append(Span<pbEntry> entries);
-// private:
-//};
-//using LogDBUPtr = std::unique_ptr<LogDB>;
-
 class LogEntry {
  public:
-  explicit LogEntry(logdb::LogReaderSPtr logDB)
-    : logDB_(std::move(logDB)),
-      inMem_(logDB_->GetRange().second),
-      committed_(logDB_->GetRange().first - 1),
-      processed_(logDB_->GetRange().first - 1)
-  {
-  }
+  explicit LogEntry(logdb::LogReaderSPtr logDB);
   DISALLOW_COPY_AND_ASSIGN(LogEntry);
-
-  uint64_t Committed() const
-  {
-    return committed_;
-  }
-
-  void SetCommitted(uint64_t committed)
-  {
-    committed_ = committed;
-  }
-
-  uint64_t Processed() const
-  {
-    return processed_;
-  }
-
-  uint64_t FirstIndex() const
-  {
-    auto index = inMem_.GetSnapshotIndex();
-    if (index.IsOK()) {
-      return index.GetOrThrow() + 1;
-    }
-    return logDB_->GetRange().first;
-  }
-
-  uint64_t LastIndex() const
-  {
-    auto index = inMem_.GetLastIndex();
-    if (index.IsOK()) {
-      return index.GetOrThrow();
-    }
-    return logDB_->GetRange().second;
-  }
-
-  StatusWith<std::pair<uint64_t, uint64_t>> EntryRange() const
-  {
-    if (inMem_.HasSnapshot() && inMem_.GetEntriesSize() == 0) {
-      return ErrorCode::LogUnavailable;
-    }
-    return std::pair<uint64_t, uint64_t>{FirstIndex(), LastIndex()};
-  }
-
-  uint64_t LastTerm() const
-  {
-    return Term(LastIndex()).GetOrThrow();
-  }
-
-  StatusWith<uint64_t> Term(uint64_t index) const
-  {
-    // TermEntryRange
-    // for firstIndex(), when it is determined by the inmem, what we actually
-    // want to return is the snapshot index, l.firstIndex() - 1 is thus required
-    // when it is determined by the logdb component, other than actual entries
-    // we have a marker entry with known index/term (but not type or data),
-    // use l.firstIndex()-1 to include this marker element.
-    // as we don't have the type/data of the marker entry, it is only used in
-    // term(), we can not pull its value and send it to the RSM for execution.
-    uint64_t first = FirstIndex() - 1;
-    uint64_t last = LastIndex();
-    if (index < first || index > last) {
-      return 0; // OK
-    }
-    auto term = inMem_.GetTerm(index);
-    if (term.IsOK()) {
-      return term;
-    }
-    term = logDB_->Term(index);
-    if (!term.IsOK() &&
-      term.Code() != ErrorCode::LogUnavailable &&
-      term.Code() != ErrorCode::LogCompacted) {
-      term.IsOKOrThrow();
-    }
-    return term;
-  }
-
-  Status CheckBound(uint64_t low, uint64_t high) const
-  {
-    if (low > high) {
-      throw Error(ErrorCode::OutOfRange, log, "low={} < high={}", low, high);
-    }
-    auto range = EntryRange();
-    if (!range.IsOK()) {
-      return ErrorCode::LogCompacted;
-    }
-    uint64_t first = range.GetOrThrow().first;
-    uint64_t last = range.GetOrThrow().second;
-    if (low < first) {
-      return ErrorCode::LogCompacted;
-    }
-    if (high > last + 1) {
-      throw Error(ErrorCode::OutOfRange, log, "high={} > last={}", high, last);
-    }
-    return ErrorCode::OK;
-  }
-
-  std::vector<pbEntrySPtr> GetUncommittedEntries() const
-  {
-    // committed entries must have been persisted in logDB
-    std::vector<pbEntrySPtr> entries;
-    uint64_t low = std::max(committed_ + 1, inMem_.GetMarkerIndex());
-    uint64_t high = inMem_.GetEntriesSize() + inMem_.GetMarkerIndex();
-    inMem_.GetEntries(entries, low, high);
-    return entries;
-  }
-
+  uint64_t Committed() const;
+  void SetCommitted(uint64_t committed);
+  uint64_t Processed() const;
+  uint64_t FirstIndex() const;
+  uint64_t LastIndex() const;
+  StatusWith<std::pair<uint64_t, uint64_t>> EntryRange() const;
+  uint64_t LastTerm() const;
+  StatusWith<uint64_t> Term(uint64_t index) const;
+  EntryVector GetUncommittedEntries() const;
   StatusWith<EntryVector> GetEntriesWithBound(
-    uint64_t low, uint64_t high, uint64_t maxSize) const
-  {
-    Status s = CheckBound(low, high);
-    if(!s.IsOK()) {
-      return s;
-    }
-    if (low == high) {
-      return EntryVector{};
-    }
-    uint64_t inMemoryMarker = inMem_.GetMarkerIndex();
-    EntryVector entries;
-    if (low >= inMemoryMarker) {
-      // retrieve from inMem
-      appendEntriesFromInMem(entries, low, high, maxSize);
-    } else if (high <= inMemoryMarker) {
-      // retrieve from logDB
-      appendEntriesFromLogDB(entries, low, high, maxSize);
-    } else {
-      // retrieve from logDB then inMem
-      Status entsdb = appendEntriesFromLogDB(entries, low, inMemoryMarker, maxSize);
-      if (!entsdb.IsOK()) {
-        return entsdb;
-      }
-      if (entries.size() < inMemoryMarker - low) {
-        // implies that the maxSize takes effect
-      } else {
-        uint64_t sizedb = 0;
-        for (auto &ent : entries) {
-          sizedb += settings::EntryNonCmdSize + ent->cmd().size();
-        }
-        appendEntriesFromInMem(entries, inMemoryMarker, high, maxSize - sizedb);
-      }
-    }
-    return entries;
-  }
-
+    uint64_t low, uint64_t high, uint64_t maxSize) const;
   StatusWith<EntryVector> GetEntriesFromStart(
-    uint64_t start, uint64_t maxSize) const
-  {
-    if (start > LastIndex()) {
-      return ErrorCode::OK;
-    }
-    return GetEntriesWithBound(start, LastIndex() + 1, maxSize);
-  }
-
+    uint64_t start, uint64_t maxSize) const;
   EntryVector GetEntriesToApply(
-    uint64_t limit = settings::Soft::ins().MaxEntrySize) const
-  {
-    if (HasEntriesToApply()) {
-      return GetEntriesWithBound(
-        firstNotAppliedIndex(), toApplyIndexLimit(), limit).GetOrThrow();
-    }
-    return {};
-  }
-
-  EntryVector GetEntriesToSave() const
-  {
-    return inMem_.GetEntriesToSave();
-  }
-
-  pbSnapshotSPtr GetSnapshot() const
-  {
-    if (inMem_.HasSnapshot()) {
-      return inMem_.GetSnapshot();
-    }
-    return logDB_->GetSnapshot();
-  }
-
-  pbSnapshotSPtr GetInMemorySnapshot() const
-  {
-    return inMem_.GetSnapshot();
-  }
-
-  bool HasEntriesToApply() const
-  {
-    return toApplyIndexLimit() > firstNotAppliedIndex();
-  }
-
-  bool HasMoreEntriesToApply(uint64_t appliedTo) const
-  {
-    return committed_ > appliedTo;
-  }
-
-  bool TryAppend(uint64_t index, const Span<pbEntrySPtr> entries)
-  {
-    uint64_t conflictIndex = getConflictIndex(entries);
-    if (conflictIndex != 0) {
-      if (conflictIndex <= committed_) {
-        throw Error(ErrorCode::LogMismatch, log,
-          "try append conflicts with committed entries, "
-          "conflictIndex={}, committed={}", conflictIndex, committed_);
-      }
-      // index = m.log_index() = remote.Next-1 (see Raft::makeReplicateMessage)
-      Append(entries.SubSpan(conflictIndex - index - 1));
-      return true;
-    }
-    return false;
-  }
-
-  void Append(const Span<pbEntrySPtr> entries)
-  {
-    if (entries.empty()) {
-      return;
-    }
-    if (entries[0]->index() <= committed_) {
-      throw Error(ErrorCode::LogMismatch, log,
-        "append conflicts with committed entries, "
-        "first={}, committed={}", entries[0]->index(), committed_);
-    }
-    inMem_.Merge(entries);
-  }
-
-  void CommitTo(uint64_t index)
-  {
-    if (index <= committed_) {
-      return;
-    }
-    if (index > LastIndex()) {
-      throw Error(ErrorCode::OutOfRange, log,
-        "commit to {}, but last index={}", index, LastIndex());
-    }
-    committed_ = index;
-  }
-
-  void CommitUpdate(const pbUpdateCommit &uc)
-  {
-    inMem_.CommitUpdate(uc);
-    if (uc.Processed > 0) {
-      if (uc.Processed < processed_ || uc.Processed > committed_) {
-        throw Error(ErrorCode::OutOfRange, log,
-          "invalid UpdateCommit, uc.Processed={} "
-          "but processed={}, committed={}",
-          uc.Processed, processed_, committed_);
-      }
-      processed_ = uc.Processed;
-    }
-    if (uc.LastApplied > 0) {
-      if (uc.LastApplied > processed_ || uc.LastApplied > committed_) {
-        throw Error(ErrorCode::OutOfRange, log,
-          "invalid UpdateCommit, uc.LastApplied={} "
-          "but processed={}, committed={}",
-          uc.LastApplied, processed_, committed_);
-      }
-      inMem_.AppliedLogTo(uc.LastApplied);
-    }
-  }
-
-  bool MatchTerm(uint64_t index, uint64_t term) const
-  {
-    auto t = Term(index);
-    if (!t.IsOK()) {
-      return false;
-    }
-    return t.GetOrThrow() == term;
-  }
-
-  // is remote node uptodate:
-  // remote term > local term
-  // or
-  // remote term == local last term && remote index >= local last index
-  bool IsUpToDate(uint64_t index, uint64_t term) const
-  {
-    uint64_t lastTerm = LastTerm();
-    if (term >= lastTerm) {
-      if (term > lastTerm) {
-        return true;
-      }
-      return index >= LastIndex();
-    }
-    return false;
-  }
-
-  bool TryCommit(uint64_t index, uint64_t term)
-  {
-    if (index <= committed_) {
-      return false;
-    }
-    auto _term = Term(index);
-    if (!_term.IsOK() && _term.Code() != ErrorCode::LogCompacted) {
-      _term.IsOKOrThrow();
-    }
-    if (index > committed_ && term == _term.GetOrDefault(0)) {
-      CommitTo(index);
-      return true;
-    }
-    return false;
-  }
-
-  // FIXME: change arg to pbSnapshotSPtr
-  void Restore(const pbSnapshot &s)
-  {
-    inMem_.Restore(std::make_shared<pbSnapshot>(s));
-    committed_ = s.index();
-    processed_ = s.index();
-  }
-
-  void InMemoryResize()
-  {
-    inMem_.Resize();
-  }
-
-  void InMemoryTryResize()
-  {
-    inMem_.TryResize();
-  }
-
+    uint64_t limit = settings::Soft::ins().MaxEntrySize) const;
+  EntryVector GetEntriesToSave() const;
+  pbSnapshotSPtr GetSnapshot() const;
+  pbSnapshotSPtr GetInMemorySnapshot() const;
+  bool HasEntriesToApply() const;
+  bool HasMoreEntriesToApply(uint64_t appliedTo) const;
+  bool TryAppend(uint64_t index, Span<pbEntrySPtr> entries);
+  void Append(Span<pbEntrySPtr> entries);
+  void CommitTo(uint64_t index);
+  void CommitUpdate(const pbUpdateCommit &uc);
+  bool MatchTerm(uint64_t index, uint64_t term) const;
+  bool IsUpToDate(uint64_t index, uint64_t term) const;
+  bool TryCommit(uint64_t index, uint64_t term);
+  void Restore(pbSnapshotSPtr s);
+  void InMemoryResize();
+  void InMemoryTryResize();
  private:
-  uint64_t firstNotAppliedIndex() const
-  {
-    return std::max(processed_ + 1, FirstIndex());
-  }
-
-  uint64_t toApplyIndexLimit() const
-  {
-    // uncommitted log can not be applied
-    return committed_ + 1;
-  }
-
-  uint64_t getConflictIndex(const Span<pbEntrySPtr> entries) const
-  {
-    for (const auto &ent : entries) {
-      if (!MatchTerm(ent->index(), ent->term())) {
-        return ent->index();
-      }
-    }
-    return 0;
-  }
-
+  Status checkBound(uint64_t low, uint64_t high) const;
+  uint64_t firstNotAppliedIndex() const;
+  uint64_t toApplyIndexLimit() const;
+  uint64_t getConflictIndex(Span<pbEntrySPtr> entries) const;
   Status appendEntriesFromLogDB(EntryVector &entries,
-    uint64_t low, uint64_t high, uint64_t maxSize) const
-  {
-    return logDB_->GetEntries(entries, low, high, maxSize);
-  }
-
+    uint64_t low, uint64_t high, uint64_t maxSize) const;
   Status appendEntriesFromInMem(EntryVector &entries,
-    uint64_t low, uint64_t high, uint64_t maxSize) const
-  {
-    inMem_.GetEntries(entries, low, high, maxSize);
-    return ErrorCode::OK;
-  }
+    uint64_t low, uint64_t high, uint64_t maxSize) const;
 
   slogger log;
   logdb::LogReaderSPtr logDB_;
