@@ -16,7 +16,7 @@
 #include "Types.h"
 #include "Logger.h"
 #include "concurrentqueue/blockingconcurrentqueue.h"
-#include "Circuitbreaker.h"
+#include "CircuitBreaker.h"
 
 namespace ycrt
 {

@@ -97,7 +97,7 @@ class Transport {
 
   std::mutex mutex_;
   std::unordered_map<std::string, SendChannelSPtr> sendChannels_; // GUARDED BY mutex_;
-  std::unordered_map<std::string, CircuitBreaker> breakers_;
+  std::unordered_map<std::string, CircuitBreaker> breakers_; // GUARDED BY mutex_;
   std::atomic_uint64_t lanes_;
   // TransportMetrics metrics_;
   // server::Context serverCtx_;
