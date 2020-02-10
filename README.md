@@ -40,7 +40,9 @@ notation:
 5. settings
     1. default settings (Soft, Hard) &radic;
     2. load settings from files &times;
-6. statemachine &times;
+6. statemachine
+    1. state machine manager &times;
+    2. state machine interface &times;
 7. tests &times;
 8. transport
     1. transport interface (Transport) &lArr;

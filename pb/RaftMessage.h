@@ -45,6 +45,7 @@ using pbConfigChangeUPtr = std::unique_ptr<raftpb::ConfigChange>;
 using pbBootstrap = raftpb::Bootstrap;
 using pbBootstrapSPtr = std::shared_ptr<raftpb::Bootstrap>;
 using pbBootstrapUPtr = std::unique_ptr<raftpb::Bootstrap>;
+using pbStateMachineType = raftpb::StateMachineType;
 
 // FIXME
 using MessageVector = std::vector<pbMessageUPtr>;
