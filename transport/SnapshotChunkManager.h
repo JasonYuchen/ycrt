@@ -75,7 +75,9 @@ class SnapshotChunkManager {
   bool shouldUpdateValidator(const pbSnapshotChunk &chunk) const;
   StatusWith<bool> nodeRemoved(const pbSnapshotChunk &chunk) const;
   Status saveChunk(const pbSnapshotChunk &chunk);
-  Status finalizeSnapshot(const pbSnapshotChunk &chunk, const pbMessageBatch &msg);
+  Status finalizeSnapshot(
+    const pbSnapshotChunk &chunk,
+    const pbMessageBatch &msg);
   server::SnapshotEnv getSnapshotEnv(const pbSnapshotChunk &chunk) const;
   pbMessageBatchUPtr toMessageBatch(
     const pbSnapshotChunk &chunk,
@@ -92,8 +94,10 @@ class SnapshotChunkManager {
   bool validate_;
   server::SnapshotLocator snapshotLocator_;
   std::mutex mutex_;
-  std::unordered_map<std::string, std::shared_ptr<track>> tracked_; // guarded by mutex_, tracked_[key] is guarded by locks_[key]
-  std::unordered_map<std::string, std::shared_ptr<std::mutex>> locks_; // guarded by mutex_
+  // guarded by mutex_, tracked_[key] is guarded by locks_[key]
+  std::unordered_map<std::string, std::shared_ptr<track>> tracked_;
+  // guarded by mutex_
+  std::unordered_map<std::string, std::shared_ptr<std::mutex>> locks_;
 };
 using SnapshotChunkManagerUPtr = std::unique_ptr<SnapshotChunkManager>;
 
