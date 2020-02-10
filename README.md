@@ -32,8 +32,11 @@ notation:
     1. core statemachine (Raft, Peer) &radic;
     2. prevote mechanism &times;
 4. server
-    1. file utils &lArr;
+    1. file utils &radic;
     2. snapshot file environment (SnapshotEnv) &radic;
+    3. double buffering message queue &lArr;
+    4. context &times;
+    5. rate limiter &times;
 5. settings
     1. default settings (Soft, Hard) &radic;
     2. load settings from files &times;
