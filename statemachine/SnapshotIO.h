@@ -9,12 +9,44 @@
 #include <boost/filesystem.hpp>
 
 #include "utils/Utils.h"
+#include "pb/RaftMessage.h"
+#include "ycrt/Config.h"
 
 namespace ycrt
 {
 
 namespace statemachine
 {
+
+enum class SnapshotRequestType : uint8_t {
+  Periodic,
+  UserRequested,
+  Exported,
+  Streaming,
+};
+
+struct SnapshotRequest {
+  SnapshotRequestType Type;
+  uint64_t Key;
+  boost::filesystem::path Path;
+  bool OverrideCompaction;
+  uint64_t CompactionOverhead;
+  bool IsExported() { return Type == SnapshotRequestType::Exported; }
+  bool IsStreaming() { return Type == SnapshotRequestType::Streaming; }
+};
+
+struct SnapshotMeta {
+  uint64_t From;
+  uint64_t Index;
+  uint64_t Term;
+  uint64_t OnDiskIndex;
+  SnapshotRequest Request;
+  pbMembershipSPtr Membership;
+  pbStateMachineType StateMachineType;
+  std::string Session;
+  any Context;
+  CompressionType CompressionType;
+};
 
 class SnapshotWriter {
  public:
