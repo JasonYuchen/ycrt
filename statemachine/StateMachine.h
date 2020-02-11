@@ -10,6 +10,7 @@
 
 #include "pb/RaftMessage.h"
 #include "utils/Utils.h"
+#include "ycrt/StateMachine.h"
 
 namespace ycrt
 {
@@ -17,54 +18,107 @@ namespace ycrt
 namespace statemachine
 {
 
-class SnapshotWriter {
- public:
-  StatusWith<uint64_t> Write(string_view content);
- private:
-};
-
-class SnapshotReader {
- public:
-  StatusWith<uint64_t> Read(std::string &content);
- private:
-};
-
-class SnapshotFileSet {
- public:
-  void AddFile(
-    uint64_t fileID,
-    boost::filesystem::path path,
-    string_view metadata);
-};
-
-// TODO: Status StateMachineManager::StreamSnapshot(any context, SnapshotWriter &writer);
-
 // StateMachine is an adapter interface for underlying StateMachine
 // (Regular/Concurrent/OnDisk StateMachine)
 class StateMachine {
  public:
-  StatusWith<uint64_t> Open(std::atomic_bool &stopped);
-  StatusWith<uint64_t> Update(EntryVector &entries);
-  StatusWith<any> Lookup(any query);
-  Status Sync();
-  StatusWith<any> PrepareSnapshot();
+  virtual StatusWith<uint64_t> Open(std::atomic_bool &stopped) = 0;
+  virtual StatusWith<uint64_t> Update(Span<pbEntrySPtr> entries) = 0;
+  virtual StatusWith<any> Lookup(any query) = 0;
+  virtual Status Sync() = 0;
+  virtual StatusWith<any> PrepareSnapshot() = 0;
+  virtual Status SaveSnapshot(
+    any context,
+    SnapshotWriter &writer,
+    SnapshotFileSet &files,
+    std::atomic_bool &stopped) = 0;
+  virtual Status RecoverFromSnapshot(
+    SnapshotReader &reader,
+    const std::vector<SnapshotFile> &files,
+    std::atomic_bool &stopped) = 0;
+  virtual Status Close() = 0;
+  virtual bool IsRegularStateMachine() const = 0;
+  virtual bool IsConcurrentStateMachine() const = 0;
+  virtual bool IsOnDiskStateMachine() const = 0;
+  virtual pbStateMachineType StateMachineType() = 0;
+};
+
+// TODO: Status StateMachineManager::StreamSnapshot(any context, SnapshotWriter &writer);
+//
+class Regular : public StateMachine {
+ public:
+  StatusWith<uint64_t> Open(std::atomic_bool &stopped) override;
+  StatusWith<uint64_t> Update(Span<pbEntrySPtr> entries) override;
+  StatusWith<any> Lookup(any query) override;
+  Status Sync() override;
+  StatusWith<any> PrepareSnapshot() override;
   Status SaveSnapshot(
     any context,
     SnapshotWriter &writer,
     SnapshotFileSet &files,
-    std::atomic_bool &stopped);
+    std::atomic_bool &stopped) override;
   Status RecoverFromSnapshot(
     SnapshotReader &reader,
-    const SnapshotFileSet &files);
-  Status Close();
-  bool IsRegularStateMachine();
-  bool IsConcurrentStateMachine();
-  bool IsOnDiskStateMachine();
-  pbStateMachineType StateMachineType();
+    const std::vector<SnapshotFile> &files,
+    std::atomic_bool &stopped) override;
+  Status Close() override;
+  bool IsRegularStateMachine() const override;
+  bool IsConcurrentStateMachine() const override;
+  bool IsOnDiskStateMachine() const override;
+  pbStateMachineType StateMachineType() override;
  private:
-  // TODO: ycrt::StateMachineUPtr
+  std::unique_ptr<ycrt::RegularStateMachine> sm_;
 };
 
+class Concurrent : public StateMachine {
+ public:
+  StatusWith<uint64_t> Open(std::atomic_bool &stopped) override;
+  StatusWith<uint64_t> Update(Span<pbEntrySPtr> entries) override;
+  StatusWith<any> Lookup(any query) override;
+  Status Sync() override;
+  StatusWith<any> PrepareSnapshot() override;
+  Status SaveSnapshot(
+    any context,
+    SnapshotWriter &writer,
+    SnapshotFileSet &files,
+    std::atomic_bool &stopped) override;
+  Status RecoverFromSnapshot(
+    SnapshotReader &reader,
+    const std::vector<SnapshotFile> &files,
+    std::atomic_bool &stopped) override;
+  Status Close() override;
+  bool IsRegularStateMachine() const override;
+  bool IsConcurrentStateMachine() const override;
+  bool IsOnDiskStateMachine() const override;
+  pbStateMachineType StateMachineType() override;
+ private:
+  std::unique_ptr<ycrt::ConcurrentStateMachine> sm_;
+};
+
+class OnDisk : public StateMachine {
+ public:
+  StatusWith<uint64_t> Open(std::atomic_bool &stopped) override;
+  StatusWith<uint64_t> Update(Span<pbEntrySPtr> entries) override;
+  StatusWith<any> Lookup(any query) override;
+  Status Sync() override;
+  StatusWith<any> PrepareSnapshot() override;
+  Status SaveSnapshot(
+    any context,
+    SnapshotWriter &writer,
+    SnapshotFileSet &files,
+    std::atomic_bool &stopped) override;
+  Status RecoverFromSnapshot(
+    SnapshotReader &reader,
+    const std::vector<SnapshotFile> &files,
+    std::atomic_bool &stopped) override;
+  Status Close() override;
+  bool IsRegularStateMachine() const override;
+  bool IsConcurrentStateMachine() const override;
+  bool IsOnDiskStateMachine() const override;
+  pbStateMachineType StateMachineType() override;
+ private:
+  std::unique_ptr<ycrt::OnDiskStateMachine> sm_;
+};
 
 
 } // namespace statemachine
