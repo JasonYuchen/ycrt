@@ -33,7 +33,7 @@ class SnapshotChunkFile {
   SnapshotChunkFile(int fd, bool syncDir, boost::filesystem::path dir);
   StatusWith<uint64_t> Read(std::string &buf);
   StatusWith<uint64_t> ReadAt(std::string &buf, int64_t offset);
-  StatusWith<uint64_t> Write(const std::string &buf);
+  StatusWith<uint64_t> Write(string_view buf);
   Status Sync();
   ~SnapshotChunkFile();
  private:

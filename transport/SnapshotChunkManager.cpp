@@ -76,7 +76,7 @@ StatusWith<uint64_t> SnapshotChunkFile::ReadAt(std::string &buf, int64_t offset)
   return uint64_t(size);
 }
 
-StatusWith<uint64_t> SnapshotChunkFile::Write(const std::string &buf)
+StatusWith<uint64_t> SnapshotChunkFile::Write(string_view buf)
 {
   int size = ::write(fd_, buf.data(), buf.size());
   if (size < 0) {
