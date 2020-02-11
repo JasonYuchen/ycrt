@@ -11,6 +11,7 @@
 
 #include <memory>
 #include <experimental/string_view>
+#include <experimental/any>
 #include <iostream>
 #include "Error.h"
 #include "Types.h"
@@ -33,6 +34,7 @@ using BlockingConcurrentQueueUPtr
 
 using slogger = std::shared_ptr<spdlog::logger>;
 using string_view = std::experimental::string_view;
+using any = std::experimental::any;
 using CircuitBreaker = circuitbreaker::NaiveCircuitBreaker;
 
 template<typename T>
