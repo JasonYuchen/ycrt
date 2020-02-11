@@ -62,7 +62,7 @@ TEST(Transport, AsyncSendSnapshotWith1Chunks)
   nhConfig1.DeploymentID = 10;
   nhConfig1.RaftAddress = "127.0.0.1:9009";
   nhConfig1.ListenAddress = "127.0.0.1:9009";
-  auto locator1 = [](uint64_t,uint64_t){return "test_snap_dir_1";};
+  auto locator1 = [](NodeInfo){return "test_snap_dir_1";};
   remove_all("test_snap_dir_1");
   remove_all("test_snap_dir_2");
   create_directory("test_snap_dir_1");
@@ -80,7 +80,7 @@ TEST(Transport, AsyncSendSnapshotWith1Chunks)
   nhConfig2.DeploymentID = 10;
   nhConfig2.RaftAddress = "127.0.0.1:9090";
   nhConfig2.ListenAddress = "127.0.0.1:9090";
-  auto locator2 = [](uint64_t,uint64_t){return "test_snap_dir_2";};
+  auto locator2 = [](NodeInfo){return "test_snap_dir_2";};
   auto resolver2 = NodeResolver::New([](uint64_t){return 0;});
   auto transport2 = Transport::New(nhConfig2, *resolver2, handler, locator2, 1);
   Log.GetLogger("transport")->info("test start");
@@ -118,7 +118,7 @@ TEST(Transport, AsyncSendSnapshotWith2Chunks)
   nhConfig1.DeploymentID = 10;
   nhConfig1.RaftAddress = "127.0.0.1:9009";
   nhConfig1.ListenAddress = "127.0.0.1:9009";
-  auto locator1 = [](uint64_t,uint64_t){return "test_snap_dir_1";};
+  auto locator1 = [](NodeInfo){return "test_snap_dir_1";};
   remove_all("test_snap_dir_1");
   remove_all("test_snap_dir_2");
   create_directory("test_snap_dir_1");
@@ -136,7 +136,7 @@ TEST(Transport, AsyncSendSnapshotWith2Chunks)
   nhConfig2.DeploymentID = 10;
   nhConfig2.RaftAddress = "127.0.0.1:9090";
   nhConfig2.ListenAddress = "127.0.0.1:9090";
-  auto locator2 = [](uint64_t,uint64_t){return "test_snap_dir_2";};
+  auto locator2 = [](NodeInfo){return "test_snap_dir_2";};
   auto resolver2 = NodeResolver::New([](uint64_t){return 0;});
   auto transport2 = Transport::New(nhConfig2, *resolver2, handler, locator2, 1);
   Log.GetLogger("transport")->info("test start");
@@ -174,7 +174,7 @@ TEST(Transport, SnapshotChunkManagerGC)
     std::abort();
   });
   Log.GetLogger("transport")->set_level(spdlog::level::debug);
-  auto locator = [](uint64_t,uint64_t){return "test_snap_dir_2";};
+  auto locator = [](NodeInfo){return "test_snap_dir_2";};
   boost::asio::io_service io;
   boost::asio::io_service::work work(io);
   thread thread([&io](){io.run();});

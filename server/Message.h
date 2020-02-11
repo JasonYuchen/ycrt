@@ -54,6 +54,11 @@ class DoubleBufferingQueue {
     assert(buffer_[current_ % 2].empty());
     return result;
   }
+  size_t Size() const
+  {
+    std::lock_guard<std::mutex> guard(mutex_);
+    return buffer_[current_ % 2].size();
+  }
  private:
   std::mutex mutex_;
   uint64_t current_;
@@ -63,6 +68,13 @@ class DoubleBufferingQueue {
 
 using RaftMessageQueueSPtr =
   std::shared_ptr<DoubleBufferingQueue<pbMessageSPtr>>;
+
+using ProposalQueueSPtr =
+  std::shared_ptr<DoubleBufferingQueue<pbEntrySPtr>>;
+
+// FIXME
+//using ReadIndexQueueSPtr =
+//  std::shared_ptr<DoubleBufferingQueue<RequestState>>;
 
 } // namespace server
 

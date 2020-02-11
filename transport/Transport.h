@@ -61,7 +61,7 @@ class Transport {
     const NodeHostConfig  &nhConfig,
     NodeResolver &resolver,
     RaftMessageHandler &handlers,
-    std::function<std::string(uint64_t, uint64_t)> &&snapshotDirFunc,
+    server::SnapshotLocator &&locator,
     uint64_t ioContexts);
   void start();
   boost::asio::io_context &nextIOContext();

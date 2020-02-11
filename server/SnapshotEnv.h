@@ -17,7 +17,7 @@ namespace server
 {
 
 // root SnapshotLocator(clusterID, nodeID)
-using SnapshotLocator = std::function<std::string(uint64_t, uint64_t)>;
+using SnapshotLocator = std::function<std::string(NodeInfo node)>;
 
 class SnapshotEnv {
  public:

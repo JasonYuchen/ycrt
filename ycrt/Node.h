@@ -13,6 +13,7 @@
 #include "statemachine/StateMachine.h"
 #include "server/Message.h"
 #include "raft/Peer.h"
+#include "raft/Quiesce.h"
 #include "ExecEngine.h"
 #include "transport/Transport.h"
 
@@ -65,6 +66,18 @@ class Node {
   std::atomic_bool stopped_;
   // FIXME: cpp20 std::atomic_shared_ptr<>
   //  std::atomic<std::shared_ptr<ClusterInfo>> clusterInfo;
+  uint64_t tickCount_;
+  uint64_t expireNotified_;
+  uint64_t tickMillisecond_;
+  // TODO: syncTask
+  // TODO: rate limited
+  bool new_;
+  // TODO: closeOnce_;
+  // TODO: snapshotState
+  std::mutex snapshotMutex_;
+  server::RaftEventListenerSPtr listener_;
+  std::atomic_bool initialized_;
+  raft::QuiesceManager quiesce_;
 };
 
 } // namespace ycrt

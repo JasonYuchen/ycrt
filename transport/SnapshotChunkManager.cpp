@@ -116,7 +116,7 @@ static string GetSnapshotKey(const pbSnapshotChunk &chunk)
 unique_ptr<SnapshotChunkManager> SnapshotChunkManager::New(
   Transport &transport,
   io_context &io,
-  function<string(uint64_t, uint64_t)> &&locator)
+  server::SnapshotLocator &&locator)
 {
   unique_ptr<SnapshotChunkManager> manager(
     new SnapshotChunkManager(transport, io, std::move(locator)));
@@ -210,7 +210,7 @@ void SnapshotChunkManager::RunTicker()
 SnapshotChunkManager::SnapshotChunkManager(
   Transport &transport,
   io_context &io,
-  function<string(uint64_t, uint64_t)> &&locator)
+  server::SnapshotLocator &&locator)
   : timeoutTick_(Soft::ins().SnapshotChunkTimeoutTick),
     gcTick_(Soft::ins().SnapshotGCTick),
     maxConcurrentSlot_(Soft::ins().MaxConcurrentStreamingSnapshot),
@@ -380,7 +380,7 @@ server::SnapshotEnv SnapshotChunkManager::getSnapshotEnv(
   const pbSnapshotChunk &chunk) const
 {
   return server::SnapshotEnv(
-    snapshotLocator_(chunk.cluster_id(), chunk.node_id()),
+    snapshotLocator_({chunk.cluster_id(), chunk.node_id()}),
     chunk.index(),
     chunk.from(),
     server::SnapshotEnv::Receiving);
