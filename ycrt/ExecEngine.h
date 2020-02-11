@@ -55,6 +55,8 @@ class ExecEngine {
   Stopper snapshotStopper_;
 };
 
+using ExecEngineSPtr = std::shared_ptr<ExecEngine>;
+
 } // namespace ycrt
 
 

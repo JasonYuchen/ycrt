@@ -20,7 +20,7 @@ TEST(Transport, Client)
   nhConfig1.RaftAddress = "127.0.0.1:9009";
   nhConfig1.ListenAddress = "127.0.0.1:9009";
   auto handler = RaftMessageHandler();
-  auto resolver1 = Nodes::New([](uint64_t){return 0;});
+  auto resolver1 = NodeResolver::New([](uint64_t){return 0;});
   resolver1->AddNode(NodeInfo{1, 2}, "127.0.0.1:9090");
   auto transport1 = Transport::New(nhConfig1, *resolver1, handler, [](uint64_t,uint64_t){return "no";}, 1);
 
@@ -28,7 +28,7 @@ TEST(Transport, Client)
   nhConfig2.DeploymentID = 10;
   nhConfig2.RaftAddress = "127.0.0.1:9090";
   nhConfig2.ListenAddress = "127.0.0.1:9090";
-  auto resolver2 = Nodes::New([](uint64_t){return 0;});
+  auto resolver2 = NodeResolver::New([](uint64_t){return 0;});
   auto transport2 = Transport::New(nhConfig2, *resolver2, handler, [](uint64_t,uint64_t){return "no";}, 1);
   Log.GetLogger("transport")->info("test start");
 
@@ -72,7 +72,7 @@ TEST(Transport, AsyncSendSnapshotWith1Chunks)
   Status s = CreateFlagFile(path("test_snap_dir_1") / "snap", testPayload);
   s.IsOKOrThrow();
   auto handler = RaftMessageHandler();
-  auto resolver1 = Nodes::New([](uint64_t){return 0;});
+  auto resolver1 = NodeResolver::New([](uint64_t){return 0;});
   resolver1->AddNode(NodeInfo{1, 2}, "127.0.0.1:9090");
   auto transport1 = Transport::New(nhConfig1, *resolver1, handler, locator1, 1);
 
@@ -81,7 +81,7 @@ TEST(Transport, AsyncSendSnapshotWith1Chunks)
   nhConfig2.RaftAddress = "127.0.0.1:9090";
   nhConfig2.ListenAddress = "127.0.0.1:9090";
   auto locator2 = [](uint64_t,uint64_t){return "test_snap_dir_2";};
-  auto resolver2 = Nodes::New([](uint64_t){return 0;});
+  auto resolver2 = NodeResolver::New([](uint64_t){return 0;});
   auto transport2 = Transport::New(nhConfig2, *resolver2, handler, locator2, 1);
   Log.GetLogger("transport")->info("test start");
   for (int i = 0; i < 1; ++i) {
@@ -128,7 +128,7 @@ TEST(Transport, AsyncSendSnapshotWith2Chunks)
   Status s = CreateFlagFile(path("test_snap_dir_1") / "snap", testPayload);
   s.IsOKOrThrow();
   auto handler = RaftMessageHandler();
-  auto resolver1 = Nodes::New([](uint64_t){return 0;});
+  auto resolver1 = NodeResolver::New([](uint64_t){return 0;});
   resolver1->AddNode(NodeInfo{1, 2}, "127.0.0.1:9090");
   auto transport1 = Transport::New(nhConfig1, *resolver1, handler, locator1, 1);
 
@@ -137,7 +137,7 @@ TEST(Transport, AsyncSendSnapshotWith2Chunks)
   nhConfig2.RaftAddress = "127.0.0.1:9090";
   nhConfig2.ListenAddress = "127.0.0.1:9090";
   auto locator2 = [](uint64_t,uint64_t){return "test_snap_dir_2";};
-  auto resolver2 = Nodes::New([](uint64_t){return 0;});
+  auto resolver2 = NodeResolver::New([](uint64_t){return 0;});
   auto transport2 = Transport::New(nhConfig2, *resolver2, handler, locator2, 1);
   Log.GetLogger("transport")->info("test start");
   for (int i = 0; i < 1; ++i) {

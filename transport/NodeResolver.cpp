@@ -2,7 +2,7 @@
 // Created by jason on 2020/1/1.
 //
 
-#include "Nodes.h"
+#include "NodeResolver.h"
 #include <sstream>
 
 namespace ycrt
@@ -28,19 +28,19 @@ ip::tcp::endpoint getEndpoint(string_view addrPort) // name:port
           static_cast<unsigned short>(stoi(addrPort.substr(pos+1).data()))};
 }
 
-NodesUPtr Nodes::New(function<uint64_t(uint64_t)> &&partitionIDFunc)
+NodeResolverUPtr NodeResolver::New(function<uint64_t(uint64_t)> &&partitionIDFunc)
 {
-  NodesUPtr node(new Nodes());
+  NodeResolverUPtr node(new NodeResolver());
   node->getPartitionID_ = std::move(partitionIDFunc);
   return node;
 }
 
-Nodes::Nodes()
+NodeResolver::NodeResolver()
   : log(Log.GetLogger("transport"))
 {
 }
 
-Nodes::Record::Record(const std::string &key) // key = 127.0.0.1:8080-1
+NodeResolver::Record::Record(const std::string &key) // key = 127.0.0.1:8080-1
   : Key(key),
     Address(key.data(), key.find('-')),
     Port(std::stol(&key[key.find(':') + 1]))
@@ -49,7 +49,7 @@ Nodes::Record::Record(const std::string &key) // key = 127.0.0.1:8080-1
 
 // AddRemoteAddress remembers the specified address obtained from the source
 // of the incoming message.
-void Nodes::AddRemoteAddress(NodeInfo node, const string &address) // address = ip:port
+void NodeResolver::AddRemoteAddress(NodeInfo node, const string &address) // address = ip:port
 {
   assert(node.Valid());
   assert(!address.empty());
@@ -65,7 +65,7 @@ void Nodes::AddRemoteAddress(NodeInfo node, const string &address) // address = 
 }
 
 // Resolve looks up the Addr of the specified node.
-NodesRecordSPtr Nodes::Resolve(NodeInfo node)
+NodesRecordSPtr NodeResolver::Resolve(NodeInfo node)
 {
   assert(node.Valid());
   NodesRecordSPtr addr;
@@ -99,7 +99,7 @@ NodesRecordSPtr Nodes::Resolve(NodeInfo node)
 
 // ReverseResolve does the reverse lookup for the specified address. A list
 // of node NodeInfos are returned for nodes that match the specified address
-vector<NodeInfo> Nodes::ReverseResolve(const string &address)
+vector<NodeInfo> NodeResolver::ReverseResolve(const string &address)
 {
   assert(!address.empty());
   vector<NodeInfo> infos;
@@ -113,7 +113,7 @@ vector<NodeInfo> Nodes::ReverseResolve(const string &address)
 }
 
 // AddNode add a new node.
-void Nodes::AddNode(NodeInfo node, const string &address) // url = ip:port
+void NodeResolver::AddNode(NodeInfo node, const string &address) // url = ip:port
 {
   assert(node.Valid());
   assert(!address.empty());
@@ -124,7 +124,7 @@ void Nodes::AddNode(NodeInfo node, const string &address) // url = ip:port
   }
 }
 
-void Nodes::RemoveNode(NodeInfo node)
+void NodeResolver::RemoveNode(NodeInfo node)
 {
   assert(node.Valid());
   lock_guard<mutex> guard(addrsMutex_);
@@ -132,7 +132,7 @@ void Nodes::RemoveNode(NodeInfo node)
 }
 
 // RemoveCluster removes all nodes info associated with the specified cluster
-void Nodes::RemoveCluster(uint64_t clusterID) // nullptr indicating the removal
+void NodeResolver::RemoveCluster(uint64_t clusterID) // nullptr indicating the removal
 {
   assert(clusterID != 0);
   lock_guard<mutex> guard(addrsMutex_);
@@ -144,13 +144,13 @@ void Nodes::RemoveCluster(uint64_t clusterID) // nullptr indicating the removal
 }
 
 // RemoveAllPeers removes all remotes.
-void Nodes::RemoveAllPeers()
+void NodeResolver::RemoveAllPeers()
 {
   lock_guard<mutex> guard(addrsMutex_);
   addrs_.clear();
 }
 
-string Nodes::getConnectionKey(const string &address, uint64_t clusterID)
+string NodeResolver::getConnectionKey(const string &address, uint64_t clusterID)
 {
   return fmt::format("{}-{}", address, getPartitionID_(clusterID));
 }

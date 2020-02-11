@@ -15,7 +15,7 @@
 #include "pb/RaftMessage.h"
 #include "utils/Utils.h"
 #include "settings/Hard.h"
-#include "Nodes.h"
+#include "NodeResolver.h"
 #include "Channel.h"
 #include "SnapshotChunkManager.h"
 
@@ -30,7 +30,7 @@ class Transport {
   DISALLOW_COPY_AND_ASSIGN(Transport);
   static std::unique_ptr<Transport> New(
     const NodeHostConfig  &nhConfig,
-    Nodes &resolver,
+    NodeResolver &resolver,
     RaftMessageHandler &handlers,
     server::SnapshotLocator &&locator,
     uint64_t ioContexts);
@@ -59,7 +59,7 @@ class Transport {
  private:
   explicit Transport(
     const NodeHostConfig  &nhConfig,
-    Nodes &resolver,
+    NodeResolver &resolver,
     RaftMessageHandler &handlers,
     std::function<std::string(uint64_t, uint64_t)> &&snapshotDirFunc,
     uint64_t ioContexts);
@@ -97,7 +97,7 @@ class Transport {
   // TODO: enable metrics
   //  TransportMetrics metrics_;
   std::string sourceAddress_;
-  Nodes &resolver_; // owned by NodeHost
+  NodeResolver &resolver_; // owned by Node
   SnapshotChunkManagerUPtr chunkManager_;
   RaftMessageHandler &handlers_; // owned by NodeHost
 };

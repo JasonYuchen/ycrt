@@ -34,6 +34,7 @@ struct SnapshotRequest {
   bool IsExported() { return Type == SnapshotRequestType::Exported; }
   bool IsStreaming() { return Type == SnapshotRequestType::Streaming; }
 };
+using SnapshotRequestSPtr = std::shared_ptr<SnapshotRequest>;
 
 struct SnapshotMeta {
   uint64_t From;
@@ -45,7 +46,7 @@ struct SnapshotMeta {
   pbStateMachineType StateMachineType;
   std::string Session;
   any Context;
-  CompressionType CompressionType;
+  enum CompressionType CompressionType;
 };
 
 class SnapshotWriter {

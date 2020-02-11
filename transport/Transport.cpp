@@ -133,7 +133,7 @@ static vector<pbSnapshotChunkSPtr> splitSnapshotMessage(const pbMessage &m)
 
 TransportUPtr Transport::New(
   const NodeHostConfig &nhConfig,
-  Nodes &resolver,
+  NodeResolver &resolver,
   RaftMessageHandler &handlers,
   server::SnapshotLocator &&locator,
   uint64_t ioContexts)
@@ -147,7 +147,7 @@ TransportUPtr Transport::New(
 
 Transport::Transport(
   const NodeHostConfig &nhConfig,
-  Nodes &resolver,
+  NodeResolver &resolver,
   RaftMessageHandler &handlers,
   server::SnapshotLocator &&locator,
   uint64_t ioContexts)

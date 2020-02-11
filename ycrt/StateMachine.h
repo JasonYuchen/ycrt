@@ -24,7 +24,7 @@ struct Result {
 struct Entry {
   uint64_t Index;
   string_view Cmd;
-  Result Result;
+  struct Result Result;
 };
 
 struct SnapshotFile {

@@ -46,7 +46,7 @@ notation:
 7. tests &times;
 8. transport
     1. transport interface (Transport) &lArr;
-    2. remote node resolver (Nodes) &radic;
+    2. remote node resolver (NodeResolver) &radic;
     3. normal message channel (SendChannel & RecvChannel) &radic;
     4. snapshot channel (SnapshotLane) &radic;
     5. snapshot chunk manager (SnapshotChunkManager) &radic;

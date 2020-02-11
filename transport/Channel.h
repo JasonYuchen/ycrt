@@ -12,7 +12,7 @@
 #include "pb/RaftMessage.h"
 #include "utils/Utils.h"
 #include "ycrt/Config.h"
-#include "Nodes.h"
+#include "NodeResolver.h"
 
 namespace ycrt
 {

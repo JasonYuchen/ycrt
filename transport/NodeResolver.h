@@ -2,8 +2,8 @@
 // Created by jason on 2020/1/1.
 //
 
-#ifndef YCRT_TRANSPORT_NODES_H_
-#define YCRT_TRANSPORT_NODES_H_
+#ifndef YCRT_TRANSPORT_NODERESOLVER_H_
+#define YCRT_TRANSPORT_NODERESOLVER_H_
 
 #include <functional>
 #include <unordered_map>
@@ -22,10 +22,10 @@ namespace transport
 boost::asio::ip::tcp::endpoint getEndpoint(const std::string &addrPort);
 boost::asio::ip::tcp::endpoint getEndpoint(string_view addrPort);
 
-class Nodes {
+class NodeResolver {
  public:
-  DISALLOW_COPY_AND_ASSIGN(Nodes);
-  static std::unique_ptr<Nodes> New(
+  DISALLOW_COPY_AND_ASSIGN(NodeResolver);
+  static std::unique_ptr<NodeResolver> New(
     std::function<uint64_t(uint64_t)> &&partitionIDFunc);
   struct Record {
     explicit Record(const std::string &key);
@@ -41,7 +41,7 @@ class Nodes {
   void RemoveCluster(uint64_t clusterID);
   void RemoveAllPeers();
  private:
-  Nodes();
+  NodeResolver();
   std::string getConnectionKey(const std::string &address, uint64_t clusterID);
   slogger log;
   std::function<uint64_t(uint64_t)> getPartitionID_;
@@ -52,9 +52,9 @@ class Nodes {
   std::mutex nodesMutex_;
   std::unordered_map<NodeInfo, std::shared_ptr<Record>, NodeInfoHash> nodes_;
 };
-using NodesSPtr = std::shared_ptr<Nodes>;
-using NodesUPtr = std::unique_ptr<Nodes>;
-using NodesRecordSPtr = std::shared_ptr<Nodes::Record>;
+using NodeResolverSPtr = std::shared_ptr<NodeResolver>;
+using NodeResolverUPtr = std::unique_ptr<NodeResolver>;
+using NodesRecordSPtr = std::shared_ptr<NodeResolver::Record>;
 
 class RaftMessageHandler {
  public:
@@ -84,4 +84,4 @@ class RaftMessageHandler {
 
 
 
-#endif //YCRT_TRANSPORT_NODES_H_
+#endif //YCRT_TRANSPORT_NODERESOLVER_H_
