@@ -7,7 +7,9 @@
 
 #include <stdint.h>
 #include <boost/filesystem.hpp>
+#include <logdb/LogDB.h>
 
+#include "server/SnapshotEnv.h"
 #include "utils/Utils.h"
 #include "pb/RaftMessage.h"
 #include "ycrt/Config.h"
@@ -31,8 +33,8 @@ struct SnapshotRequest {
   boost::filesystem::path Path;
   bool OverrideCompaction;
   uint64_t CompactionOverhead;
-  bool IsExported() { return Type == SnapshotRequestType::Exported; }
-  bool IsStreaming() { return Type == SnapshotRequestType::Streaming; }
+  bool IsExported() const { return Type == SnapshotRequestType::Exported; }
+  bool IsStreaming() const { return Type == SnapshotRequestType::Streaming; }
 };
 using SnapshotRequestSPtr = std::shared_ptr<SnapshotRequest>;
 
@@ -49,16 +51,28 @@ struct SnapshotMeta {
   enum CompressionType CompressionType;
 };
 
+// TODO: currently a naive implementation of SnapshotWriter
+//  consider compressor, buffering, etc
 class SnapshotWriter {
  public:
-  StatusWith<uint64_t> Write(string_view content);
+  SnapshotWriter(boost::filesystem::path path, CompressionType type);
+  uint64_t Write(string_view content);
+  ~SnapshotWriter();
  private:
+  int fd_;
+  boost::filesystem::path fp_;
 };
 
+// TODO: currently a naive implementation of SnapshotReader
+//  consider compressor, buffering, etc
 class SnapshotReader {
  public:
-  StatusWith<uint64_t> Read(std::string &content);
+  SnapshotReader(boost::filesystem::path path, CompressionType type);
+  uint64_t Read(std::string &content);
+  ~SnapshotReader();
  private:
+  int fd_;
+  boost::filesystem::path fp_;
 };
 
 class SnapshotFileSet {
@@ -75,9 +89,19 @@ class SnapshotFileSet {
   // metadata.
   void AddFile(
     uint64_t fileID,// FileID is the ID of the file
-    boost::filesystem::path path,// Filepath is the current full path of the file.
-    string_view metadata);// Metadata is the metadata
+    const boost::filesystem::path &path,// Filepath is the current full path of the file.
+    std::string metadata);// Metadata is the metadata
+  size_t Size() const;
+  pbSnapshotFileSPtr GetFile(uint64_t index);
+  // After PrepareFiles, the underlying files_ will be empty
+  StatusWith<std::vector<pbSnapshotFileSPtr>> PrepareFiles(
+    const boost::filesystem::path &tmpdir,
+    const boost::filesystem::path &finaldir);
+ private:
+  std::vector<pbSnapshotFileSPtr> files_;
+  std::unordered_set<uint64_t> ids_;
 };
+
 
 } // namespace statemachine
 

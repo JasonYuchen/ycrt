@@ -31,6 +31,7 @@ notation:
 3. raft
     1. core statemachine (Raft, Peer) &radic;
     2. prevote mechanism &times;
+    3. quiesce manager &radic;
 4. server
     1. file utils &radic;
     2. snapshot file environment (SnapshotEnv) &radic;
@@ -41,8 +42,12 @@ notation:
     1. default settings (Soft, Hard) &radic;
     2. load settings from files &times;
 6. statemachine
-    1. state machine manager &times;
-    2. state machine interface &times;
+    1. state machine manager &lArr;
+    2. state machine interface (Regular/Concurrent/OnDiskStateMachine) &radic;
+    3. core state machine &times;
+    4. snapshot manager (Snapshotter) &lArr;
+    5. snapshot io (SnapshotWriter & SnapshotReader) &lArr;
+    6. extra snapshot file collections (SnapshotFileSet) &radic;
 7. tests &times;
 8. transport
     1. transport interface (Transport) &lArr;
@@ -60,7 +65,7 @@ notation:
     4. error reporting (Error) &radic;
 10. ycrt
     1. configuration (Config) &radic;
-    2. raft node (Node) &times;
+    2. raft node (Node) &lArr;
     3. ycrt interface (NodeHost) &times;
     4. core engine (ExecEngine) &times;
     5. 
