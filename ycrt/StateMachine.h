@@ -16,10 +16,35 @@ using statemachine::SnapshotReader;
 using statemachine::SnapshotWriter;
 using statemachine::SnapshotFileSet;
 
+
+// Value + size + Data, size = len(Data)
 struct Result {
   uint64_t Value;
   any Data;
+  // FIXME:
+  size_t AppendToString(std::string &buf) const {
+    size_t size = any_cast<std::string&>(Data).size();
+    buf.append(reinterpret_cast<const char *>(&Value), sizeof(Value));
+    buf.append(reinterpret_cast<const char *>(&size), sizeof(size));
+    buf.append(any_cast<std::string&>(Data));
+    return sizeof(Value) + sizeof(size) + size;
+  }
+  // FIXME:
+  size_t FromString(string_view buf) {
+    size_t size;
+    if (buf.size() < sizeof(Value) + sizeof(size)) {
+      throw Error(ErrorCode::ShortRead);
+    }
+    ::memcpy(&Value, buf.data(), sizeof(Value));
+    ::memcpy(&size, buf.data()+sizeof(Value), sizeof(size));
+    if (buf.size() - sizeof(Value) - sizeof(size) < size) {
+      throw Error(ErrorCode::ShortRead);
+    }
+    Data = std::string(buf.data()+sizeof(Value)+sizeof(size), size);
+    return sizeof(Value) + sizeof(size) + size;
+  }
 };
+using ResultSPtr = std::shared_ptr<Result>;
 
 struct Entry {
   uint64_t Index;

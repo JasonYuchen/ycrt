@@ -35,6 +35,7 @@ using BlockingConcurrentQueueUPtr
 using slogger = std::shared_ptr<spdlog::logger>;
 using string_view = std::experimental::string_view;
 using any = std::experimental::any;
+using std::experimental::any_cast;
 using CircuitBreaker = circuitbreaker::NaiveCircuitBreaker;
 
 template<typename T>
