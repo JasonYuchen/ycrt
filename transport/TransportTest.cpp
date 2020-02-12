@@ -22,14 +22,14 @@ TEST(Transport, Client)
   auto handler = RaftMessageHandler();
   auto resolver1 = NodeResolver::New([](uint64_t){return 0;});
   resolver1->AddNode(NodeInfo{1, 2}, "127.0.0.1:9090");
-  auto transport1 = Transport::New(nhConfig1, *resolver1, handler, [](uint64_t,uint64_t){return "no";}, 1);
+  auto transport1 = Transport::New(nhConfig1, *resolver1, handler, [](NodeInfo){return "no";}, 1);
 
   auto nhConfig2 = NodeHostConfig();
   nhConfig2.DeploymentID = 10;
   nhConfig2.RaftAddress = "127.0.0.1:9090";
   nhConfig2.ListenAddress = "127.0.0.1:9090";
   auto resolver2 = NodeResolver::New([](uint64_t){return 0;});
-  auto transport2 = Transport::New(nhConfig2, *resolver2, handler, [](uint64_t,uint64_t){return "no";}, 1);
+  auto transport2 = Transport::New(nhConfig2, *resolver2, handler, [](NodeInfo){return "no";}, 1);
   Log.GetLogger("transport")->info("test start");
 
   for (int i = 0; i < 20; ++i) {
@@ -69,8 +69,7 @@ TEST(Transport, AsyncSendSnapshotWith1Chunks)
   create_directory("test_snap_dir_2");
   string testPayload;
   testPayload.insert(0, 1 * 1024 * 1024, 'a');
-  Status s = CreateFlagFile(path("test_snap_dir_1") / "snap", testPayload);
-  s.IsOKOrThrow();
+  CreateFlagFile(path("test_snap_dir_1") / "snap", testPayload);
   auto handler = RaftMessageHandler();
   auto resolver1 = NodeResolver::New([](uint64_t){return 0;});
   resolver1->AddNode(NodeInfo{1, 2}, "127.0.0.1:9090");
@@ -98,7 +97,7 @@ TEST(Transport, AsyncSendSnapshotWith1Chunks)
     sp->set_on_disk_index(7);
     sp->set_cluster_id(1);
     sp->set_filepath((path("test_snap_dir_1") / "snap").string());
-    sp->set_file_size(8 + testPayload.size()); // check, header=8 bytes (uint64_t), payload=4 bytes ("test")
+    sp->set_file_size(testPayload.size()); // check, header=8 bytes (uint64_t), payload=4 bytes ("test")
     sp->set_allocated_membership(new pbMembership());
     sp->set_witness(false);
     transport1->AsyncSendSnapshot(std::move(msg1));
@@ -125,8 +124,7 @@ TEST(Transport, AsyncSendSnapshotWith2Chunks)
   create_directory("test_snap_dir_2");
   string testPayload;
   testPayload.insert(0, 3 * 1024 * 1024, 'a');
-  Status s = CreateFlagFile(path("test_snap_dir_1") / "snap", testPayload);
-  s.IsOKOrThrow();
+  CreateFlagFile(path("test_snap_dir_1") / "snap", testPayload);
   auto handler = RaftMessageHandler();
   auto resolver1 = NodeResolver::New([](uint64_t){return 0;});
   resolver1->AddNode(NodeInfo{1, 2}, "127.0.0.1:9090");
