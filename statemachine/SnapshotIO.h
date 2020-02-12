@@ -57,10 +57,14 @@ class SnapshotWriter {
  public:
   SnapshotWriter(boost::filesystem::path path, CompressionType type);
   uint64_t Write(string_view content);
+  uint64_t GetPayloadSize() const;
+  // TODO: use crc32 for checksum
+  uint64_t GetPayloadChecksum() const;
   ~SnapshotWriter();
  private:
   int fd_;
   boost::filesystem::path fp_;
+  uint64_t writtenBytes_;
 };
 
 // TODO: currently a naive implementation of SnapshotReader
@@ -94,9 +98,8 @@ class SnapshotFileSet {
   size_t Size() const;
   pbSnapshotFileSPtr GetFile(uint64_t index);
   // After PrepareFiles, the underlying files_ will be empty
-  StatusWith<std::vector<pbSnapshotFileSPtr>> PrepareFiles(
-    const boost::filesystem::path &tmpdir,
-    const boost::filesystem::path &finaldir);
+  std::vector<pbSnapshotFileSPtr> PrepareFiles(
+    const server::SnapshotEnv &env);
  private:
   std::vector<pbSnapshotFileSPtr> files_;
   std::unordered_set<uint64_t> ids_;

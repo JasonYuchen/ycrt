@@ -17,7 +17,7 @@ using namespace boost::filesystem;
 using boost::system::error_code;
 
 SnapshotWriter::SnapshotWriter(path path, CompressionType type)
-  : fd_(-1), fp_(std::move(path))
+  : fd_(-1), fp_(std::move(path)), writtenBytes_(0)
 {
   if ((fd_ = ::open(fp_.c_str(), O_RDWR | O_CREAT | O_TRUNC | O_CLOEXEC)) < 0) {
     throw Error(ErrorCode::FileSystem,
@@ -37,7 +37,18 @@ uint64_t SnapshotWriter::Write(string_view content)
       "SnapshotWriter::Write: short write, expected {} actual {}: {}",
       content.size(), size, strerror(errno));
   }
+  writtenBytes_ += size;
   return size;
+}
+
+uint64_t SnapshotWriter::GetPayloadSize() const
+{
+  return writtenBytes_;
+}
+
+uint64_t SnapshotWriter::GetPayloadChecksum() const
+{
+  return writtenBytes_;
 }
 
 SnapshotWriter::~SnapshotWriter()
@@ -77,13 +88,12 @@ pbSnapshotFileSPtr SnapshotFileSet::GetFile(uint64_t index)
   return files_[index];
 }
 
-StatusWith<vector<pbSnapshotFileSPtr>> SnapshotFileSet::PrepareFiles(
-  const path &tmpdir,
-  const path &finaldir)
+vector<pbSnapshotFileSPtr> SnapshotFileSet::PrepareFiles(
+  const server::SnapshotEnv &env)
 {
   for (auto &file : files_) {
     string fn = fmt::format("external-file-{}", file->file_id());
-    path fp = tmpdir / fn;
+    path fp = env.GetTempDir() / fn;
     create_hard_link(file->file_path(), fp);
     uint64_t fileSize = file_size(fp);
     if (is_directory(fp)) {
@@ -92,7 +102,7 @@ StatusWith<vector<pbSnapshotFileSPtr>> SnapshotFileSet::PrepareFiles(
     if (fileSize == 0) {
       throw Error(ErrorCode::FileSystem, "the extra file is empty");
     }
-    file->set_file_path((finaldir / fn).string());
+    file->set_file_path((env.GetFinalDir() / fn).string());
     file->set_file_size(fileSize);
   }
   std::vector<pbSnapshotFileSPtr> files = std::move(files_);

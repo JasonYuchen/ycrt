@@ -44,14 +44,14 @@ StatusWith<bool> Manager::SaveSnapshot(
   SnapshotWriter &writer,
   SnapshotFileSet &files)
 {
-  StatusWith<uint64_t> s = writer.Write(meta.Session);
+  writer.Write(meta.Session);
   if (config_->IsWitness ||
     (sm_->IsOnDiskStateMachine() && !meta.Request.IsExported())) {
-    return {true, s.Code()};
+    return true;
   }
-  Status ret = sm_->SaveSnapshot(
+  Status s = sm_->SaveSnapshot(
     std::move(meta.Context), writer, files, stopped_);
-  return {false, ret.Code()};
+  return {false, s.Code()};
 }
 
 Status Manager::RecoverFromSnapshot(
