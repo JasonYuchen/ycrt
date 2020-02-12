@@ -25,16 +25,15 @@ namespace transport
 // {snapshot} - split, send (managed by Transport) ->
 // {chunk1 chunk2 ...} - receive, merge (managed by SnapshotChunkFile) ->
 // {snapshot}
-// FIXME: consider throw instead of Status
 class SnapshotChunkFile {
  public:
   enum Mode { CREATE, READ, APPEND };
   static SnapshotChunkFile Open(boost::filesystem::path file, Mode mode);
   SnapshotChunkFile(int fd, bool syncDir, boost::filesystem::path dir);
-  StatusWith<uint64_t> Read(std::string &buf);
-  StatusWith<uint64_t> ReadAt(std::string &buf, int64_t offset);
-  StatusWith<uint64_t> Write(string_view buf);
-  Status Sync();
+  uint64_t Read(std::string &buf);
+  uint64_t ReadAt(std::string &buf, int64_t offset);
+  uint64_t Write(string_view buf);
+  void Sync();
   ~SnapshotChunkFile();
  private:
   int fd_;
@@ -73,8 +72,8 @@ class SnapshotChunkManager {
   // TODO: move to the class SnapshotChunk
   void deleteTempChunkDir(const pbSnapshotChunk &chunk);
   bool shouldUpdateValidator(const pbSnapshotChunk &chunk) const;
-  StatusWith<bool> nodeRemoved(const pbSnapshotChunk &chunk) const;
-  Status saveChunk(const pbSnapshotChunk &chunk);
+  bool nodeRemoved(const pbSnapshotChunk &chunk) const;
+  void saveChunk(const pbSnapshotChunk &chunk);
   Status finalizeSnapshot(
     const pbSnapshotChunk &chunk,
     const pbMessageBatch &msg);

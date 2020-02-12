@@ -24,6 +24,7 @@ class SnapshotEnv {
   enum Mode { Snapshotting, Receiving };
   // root = SnapshotLocator(clusterID, nodeID)
   SnapshotEnv(const std::string &root, uint64_t index, uint64_t from, Mode mode);
+  DEFAULT_COPY_MOVE_AND_ASSIGN(SnapshotEnv);
 
   // GetRootDir returns the root directory. The temp and final snapshot
   // directories are children of the root directory.
@@ -45,26 +46,26 @@ class SnapshotEnv {
   boost::filesystem::path GetTempFilePath() const;
 
   // CreateTempDir creates the temp snapshot directory.
-  Status CreateTempDir() { return createDir(tmpDir_, false); }
+  void CreateTempDir() { createDir(tmpDir_); }
 
   // RemoveTempDir removes the temp snapshot directory.
-  Status RemoveTempDir(bool must) { return removeDir(tmpDir_, must); }
+  void RemoveTempDir() { removeDir(tmpDir_); }
 
   // RemoveFinalDir removes the final snapshot directory.
-  Status RemoveFinalDir(bool must) { return removeDir(finalDir_, must); }
+  void RemoveFinalDir() { removeDir(finalDir_); }
 
   // SaveSnapshotMetadata saves the metadata of the snapshot file.
-  Status SaveSnapshotMetadata(string_view metadata);
+  void SaveSnapshotMetadata(string_view metadata);
 
   bool HasFlagFile();
-  Status RemoveFlagFile();
+  void RemoveFlagFile();
 
   // FinalizeSnapshot finalizes the snapshot.
   // FIXME: FinalizeSnapshot argument proto.Message ?
   Status FinalizeSnapshot(string_view snapshotMsgRaw);
  private:
-  Status createDir(const boost::filesystem::path &dir, bool must);
-  Status removeDir(const boost::filesystem::path &dir, bool must);
+  void createDir(const boost::filesystem::path &dir);
+  void removeDir(const boost::filesystem::path &dir);
 
   static std::mutex finalizeLock_;
   uint64_t index_;
@@ -73,6 +74,8 @@ class SnapshotEnv {
   boost::filesystem::path finalDir_; // final snapshot directory, child of rootDir
   boost::filesystem::path filePath_; // snapshot file path
 };
+
+using SnapshotEnvUPtr = std::unique_ptr<SnapshotEnv>;
 
 } // namespace server
 

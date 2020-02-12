@@ -23,19 +23,22 @@ SnapshotChunkFile SnapshotChunkFile::Open(path file, Mode mode)
   if (mode == CREATE) {
     int fd = ::open(file.c_str(), O_CREAT | O_RDWR | O_TRUNC | O_CLOEXEC);
     if (fd < 0) {
-      throw Error(ErrorCode::FileSystem, strerror(errno));
+      throw Error(ErrorCode::FileSystem,
+        "SnapshotChunkFile::Open: mode=create failed: {}", strerror(errno));
     }
     return SnapshotChunkFile(fd, true, file.parent_path());
   } else if (mode == READ) {
     int fd = ::open(file.c_str(), O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
-      throw Error(ErrorCode::FileSystem, strerror(errno));
+      throw Error(ErrorCode::FileSystem,
+        "SnapshotChunkFile::Open: mode=read failed: {}", strerror(errno));
     }
     return SnapshotChunkFile(fd, false, {});
   } else if (mode == APPEND) {
     int fd = ::open(file.c_str(), O_RDWR | O_APPEND | O_CLOEXEC);
     if (fd < 0) {
-      throw Error(ErrorCode::FileSystem, strerror(errno));
+      throw Error(ErrorCode::FileSystem,
+        "SnapshotChunkFile::Open: mode=append failed: {}", strerror(errno));
     }
     return SnapshotChunkFile(fd, false, {});
   } else {
@@ -48,57 +51,66 @@ SnapshotChunkFile::SnapshotChunkFile(int fd, bool syncDir, path dir)
 {
 }
 
-StatusWith<uint64_t> SnapshotChunkFile::Read(std::string &buf)
+uint64_t SnapshotChunkFile::Read(std::string &buf)
 {
   int size = ::read(fd_, const_cast<char*>(buf.data()), buf.size());
   if (size < 0) {
-    return {0, ErrorCode::FileSystem};
+    throw Error(ErrorCode::FileSystem,
+      "SnapshotChunkFile::Read: read failed: {}", strerror(errno));
   }
   if (uint64_t(size) < buf.size()) {
-    return {uint64_t(size), ErrorCode::ShortRead};
+    throw Error(ErrorCode::FileSystem,
+      "SnapshotChunkFile::Read: short read, expected {} actual {}: {}",
+      buf.size(), size, strerror(errno));
   }
-  return uint64_t(size);
+  return size;
 }
 
-StatusWith<uint64_t> SnapshotChunkFile::ReadAt(std::string &buf, int64_t offset)
+uint64_t SnapshotChunkFile::ReadAt(std::string &buf, int64_t offset)
 {
   int size = ::lseek(fd_, offset, SEEK_SET);
   if (size < 0) {
-    return ErrorCode::FileSystem;
+    throw Error(ErrorCode::FileSystem,
+      "SnapshotChunkFile::ReadAt: lseek failed: {}", strerror(errno));
   }
   size = ::read(fd_, const_cast<char*>(buf.data()), buf.size());
   if (size < 0) {
-    return {0, ErrorCode::FileSystem};
+    throw Error(ErrorCode::FileSystem,
+      "SnapshotChunkFile::ReadAt: read failed: {}", strerror(errno));
   }
   if (uint64_t(size) < buf.size()) {
-    return {uint64_t(size), ErrorCode::ShortRead};
+    throw Error(ErrorCode::FileSystem,
+      "SnapshotChunkFile::ReadAt: short read, expected {} actual {}: {}",
+      buf.size(), size, strerror(errno));
   }
-  return uint64_t(size);
+  return size;
 }
 
-StatusWith<uint64_t> SnapshotChunkFile::Write(string_view buf)
+uint64_t SnapshotChunkFile::Write(string_view buf)
 {
   int size = ::write(fd_, buf.data(), buf.size());
   if (size < 0) {
-    return {0, ErrorCode::FileSystem};
+    throw Error(ErrorCode::FileSystem,
+      "SnapshotChunkFile::Write: write failed: {}", strerror(errno));
   }
   if (uint64_t(size) < buf.size()) {
-    return {uint64_t(size), ErrorCode::ShortWrite};
+    throw Error(ErrorCode::FileSystem,
+      "SnapshotChunkFile::Write: short write, expected {} actual {}: {}",
+      buf.size(), size, strerror(errno));
   }
-  return uint64_t(size);
+  return size;
 }
 
-Status SnapshotChunkFile::Sync()
+void SnapshotChunkFile::Sync()
 {
-  return SyncFd(fd_);
+  SyncFd(fd_);
 }
 
 SnapshotChunkFile::~SnapshotChunkFile()
 {
   if (::close(fd_) < 0) {
     Log.GetLogger("transport")->warn(
-      "SnapshotChunkFile::~SnapshotChunkFile: "
-      "failed to close fd={} due to error: {}",
+      "SnapshotChunkFile::~SnapshotChunkFile: close fd={} failed in dtor: {}",
       fd_, strerror(errno));
   }
   if (syncDir_) {
@@ -136,27 +148,20 @@ bool SnapshotChunkManager::AddChunk(pbSnapshotChunkSPtr chunk)
   shared_ptr<mutex> snapshotLock = getSnapshotLock(snapshotKey);
   lock_guard<mutex> snapshotGuard(*snapshotLock);
   shared_ptr<track> t = onNewChunk(snapshotKey, chunk);
-  // FIXME: consider try {} catch {} ...
   if (!t) {
     return false;
   }
   if (shouldUpdateValidator(*chunk)) {
     // TODO: validator
   }
-  bool removed = nodeRemoved(*chunk).GetOrThrow();
-  if (removed) {
+  if (nodeRemoved(*chunk)) {
     deleteTempChunkDir(*chunk);
     log->warn("SnapshotChunkManager::AddChunk: snapshot {}: "
               "node removed, ignored chunk {}", snapshotKey, chunk->chunk_id());
     return false;
   }
-  Status saved = saveChunk(*chunk);
-  if (!saved.IsOK()) {
-    deleteTempChunkDir(*chunk);
-    throw Error(saved.Code(), log,
-      "SnapshotChunkManager::AddChunk: snapshot {}: "
-      "failed to save chunk {}", snapshotKey, chunk->chunk_id());
-  }
+  // FIXME: check exceptions?
+  saveChunk(*chunk);
   if (chunk->chunk_id() + 1 == chunk->chunk_count()) {
     log->info("SnapshotChunkManager::AddChunk: snapshot {}: "
               "received last chunk {}", snapshotKey, chunk->chunk_id());
@@ -323,7 +328,7 @@ void SnapshotChunkManager::deleteTrack(const string &key)
 
 void SnapshotChunkManager::deleteTempChunkDir(const pbSnapshotChunk &chunk)
 {
-  getSnapshotEnv(chunk).RemoveTempDir(true);
+  getSnapshotEnv(chunk).RemoveTempDir();
 }
 
 bool SnapshotChunkManager::shouldUpdateValidator(
@@ -332,36 +337,29 @@ bool SnapshotChunkManager::shouldUpdateValidator(
   return validate_ && !chunk.has_file_info() && chunk.chunk_id() != 0;
 }
 
-StatusWith<bool> SnapshotChunkManager::nodeRemoved(
+bool SnapshotChunkManager::nodeRemoved(
   const pbSnapshotChunk &chunk) const
 {
   return IsDirMarkedAsDeleted(getSnapshotEnv(chunk).GetRootDir());
 }
 
-Status SnapshotChunkManager::saveChunk(const pbSnapshotChunk &chunk)
+void SnapshotChunkManager::saveChunk(const pbSnapshotChunk &chunk)
 {
   auto env = getSnapshotEnv(chunk);
   if (chunk.chunk_id() == 0) {
-    Status s = env.CreateTempDir();
-    if (!s.IsOK()){
-      return s;
-    }
+    env.CreateTempDir();
   }
   auto filename = path(chunk.filepath()).filename();
   auto filepath = env.GetTempDir() / filename;
   auto mode = chunk.file_chunk_id() == 0 ?
     SnapshotChunkFile::CREATE : SnapshotChunkFile::APPEND;
   SnapshotChunkFile file = SnapshotChunkFile::Open(filepath, mode);
-  StatusWith<uint64_t> size = file.Write(chunk.data());
-  if (!size.IsOK()) {
-    return size.Code();
-  }
+  file.Write(chunk.data());
   // FIXME: add methods IsLastChunk(), IsLastFileChunk() to pbSnapshotChunk
   if (chunk.chunk_id() + 1== chunk.chunk_count() ||
     chunk.file_chunk_id() + 1 == chunk.file_chunk_count()) {
-    return file.Sync();
+    file.Sync();
   }
-  return ErrorCode::OK;
 }
 
 Status SnapshotChunkManager::finalizeSnapshot(

@@ -22,125 +22,89 @@ static const char *deletedFlagFile = "DELETED";
 //  Log.GetLogger("server")->error("{}: {}", desc, strerror(errno));
 //}
 
-Status SyncFd(int fd)
+void SyncFd(int fd)
 {
   if (::fsync(fd) < 0) {
-    return ErrorCode::FileSystem;
+    throw Error(ErrorCode::FileSystem,
+      "SyncFd: fsync failed: {}", strerror(errno));
   }
-  return ErrorCode::OK;
 }
 
-Status SyncDir(const path &dir)
+void SyncDir(const path &dir)
 {
   // FIXME: check the error
   int fd = ::open(dir.c_str(), O_RDONLY);
   if (fd < 0) {
-    return ErrorCode::FileSystem;
+    throw Error(ErrorCode::FileSystem,
+      "SyncDir: open failed: {}", strerror(errno));
   }
   if (::fsync(fd) < 0) {
     ::close(fd);
-    return ErrorCode::FileSystem;
+    throw Error(ErrorCode::FileSystem,
+      "SyncDir: fsync failed: {}", strerror(errno));
   }
   if (::close(fd) < 0) {
-    return ErrorCode::FileSystem;
-  }
-  return ErrorCode::OK;
-}
-
-//Status Sync(fstream &fs)
-//{
-//  // FIXME: ugly hacking
-//  // fs.sync();
-//  if (!fs) {
-//    return ErrorCode::FileSystem;
-//  }
-//  class F : public boost::filesystem::filebuf {
-//   public:
-//    int fd() { return _M_file.fd(); }
-//  };
-//  int fd = static_cast<F&>(*fs.rdbuf()).fd();
-//  if(fd < 0) {
-//    logErrno("Sync fd");
-//    return ErrorCode::FileSystem;
-//  }
-//  if (::fsync(fd) < 0) {
-//    logErrno("Sync fsync");
-//    return ErrorCode::FileSystem;
-//  }
-//  return ErrorCode::OK;
-//}
-
-Status MarkDirAsDeleted(const path &dir, string_view content)
-{
-  return CreateFlagFile(dir / deletedFlagFile, content);
-}
-
-StatusWith<bool> IsDirMarkedAsDeleted(const path &dir)
-{
-  error_code ec;
-  bool existing = exists(dir / deletedFlagFile, ec);
-  if (ec && ec.value() != ENOENT) {
-    return ErrorCode::FileSystem;
-  } else {
-    return existing;
+    throw Error(ErrorCode::FileSystem,
+      "SyncDir: close failed: {}", strerror(errno));
   }
 }
 
-Status CreateFlagFile(const path &filePath, string_view content)
+void MarkDirAsDeleted(const path &dir, string_view content)
+{
+  CreateFlagFile(dir / deletedFlagFile, content);
+}
+
+bool IsDirMarkedAsDeleted(const path &dir)
+{
+  return exists(dir / deletedFlagFile);
+}
+
+void CreateFlagFile(const path &filePath, string_view content)
 {
   int fd = ::open(filePath.c_str(), O_RDWR | O_CREAT | O_TRUNC | O_CLOEXEC);
   if (fd < 0) {
-    return ErrorCode::FileSystem;
+    throw Error(ErrorCode::FileSystem,
+      "CreateFlagFile: open failed: {}", strerror(errno));
   }
-  size_t len = content.size();
-  size_t size = ::write(fd, &len, sizeof(size_t));
-  if (size != sizeof(size_t)) {
+  size_t size = ::write(fd, content.data(), content.size());
+  if (size != content.size()) {
     ::close(fd);
-    return ErrorCode::FileSystem;
-  }
-  size = ::write(fd, content.data(), len);
-  if (size != len) {
-    ::close(fd);
-    return ErrorCode::FileSystem;
+    throw Error(ErrorCode::FileSystem,
+      "CreateFlagFile: short write, expected {} actual {}: {}",
+      content.size(), size, strerror(errno));
   }
   if (::fsync(fd) < 0) {
     ::close(fd);
-    return ErrorCode::FileSystem;
+    throw Error(ErrorCode::FileSystem,
+      "CreateFlagFile: fsync failed: {}", strerror(errno));
   }
   if (::close(fd) < 0) {
-    return ErrorCode::FileSystem;
+    throw Error(ErrorCode::FileSystem,
+      "CreateFlagFile: close failed: {}", strerror(errno));
   }
-  return ErrorCode::OK;
 }
 
-Status RemoveFlagFile(const path &filePath)
+void RemoveFlagFile(const path &filePath)
 {
-  error_code ec;
-  bool done = remove(filePath, ec);
-  if (!done || ec) {
-    return ErrorCode::FileSystem;
-  }
-  return ErrorCode::OK;
+  remove(filePath);
 }
 
-StatusWith<string> GetFlagFileContent(const path &filePath)
+string GetFlagFileContent(const path &filePath)
 {
+  size_t len = file_size(filePath);
   int fd = ::open(filePath.c_str(), O_RDONLY | O_CLOEXEC);
   if (fd < 0) {
-    return ErrorCode::FileSystem;
+    throw Error(ErrorCode::FileSystem,
+      "GetFlagFileContent: open failed: {}", strerror(errno));
   }
-  size_t len;
   std::string result;
-  size_t size = ::read(fd, &len, sizeof(size_t));
-  if (size != sizeof(size_t)) {
-    ::close(fd);
-    return ErrorCode::FileSystem;
-  }
   result.resize(len);
-  size = ::read(fd, const_cast<char*>(result.data()), len);
+  size_t size = ::read(fd, const_cast<char*>(result.data()), len);
   if (size != len) {
     ::close(fd);
-    return ErrorCode::FileSystem;
+    throw Error(ErrorCode::FileSystem,
+      "GetFlagFileContent: short read, expected {} actual {}: {}",
+      len, size, strerror(errno));
   }
   return result;
 }

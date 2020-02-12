@@ -85,79 +85,52 @@ path SnapshotEnv::GetTempFilePath() const
   return tmpDir_ / getFileName(index_);
 }
 
-Status SnapshotEnv::SaveSnapshotMetadata(string_view metadata)
+void SnapshotEnv::SaveSnapshotMetadata(string_view metadata)
 {
-  return CreateFlagFile(tmpDir_ / snapshotMetadataFlagFile, metadata);
+  CreateFlagFile(tmpDir_ / snapshotMetadataFlagFile, metadata);
 }
 
 bool SnapshotEnv::HasFlagFile()
 {
-  error_code ec;
-  bool existing = exists(finalDir_ / snapshotFlagFile, ec);
-  return existing;
+  return exists(finalDir_ / snapshotFlagFile);
 }
 
-Status SnapshotEnv::RemoveFlagFile()
+void SnapshotEnv::RemoveFlagFile()
 {
-  return ycrt::RemoveFlagFile(finalDir_ / snapshotFlagFile);
+  ycrt::RemoveFlagFile(finalDir_ / snapshotFlagFile);
 }
 
 Status SnapshotEnv::FinalizeSnapshot(string_view snapshotMsgRaw)
 {
   lock_guard<mutex> guard(finalizeLock_);
-  Status s = CreateFlagFile(tmpDir_ / snapshotFlagFile, snapshotMsgRaw);
-  if (!s.IsOK()) {
-    return s;
-  }
-  // FIXME: check ec?
-  error_code ec;
-  bool finalExisting = exists(finalDir_, ec);
+  CreateFlagFile(tmpDir_ / snapshotFlagFile, snapshotMsgRaw);
+  bool finalExisting = exists(finalDir_);
   if (finalExisting) {
     return ErrorCode::SnapshotOutOfDate;
   }
-  rename(tmpDir_, finalDir_, ec);
-  if (ec) {
-    return ErrorCode::SnapshotEnvError;
-  }
-  return SyncDir(rootDir_);
+  rename(tmpDir_, finalDir_);
+  SyncDir(rootDir_);
+  return ErrorCode::OK;
 }
 
-Status SnapshotEnv::createDir(const path &dir, bool must)
+void SnapshotEnv::createDir(const path &dir)
 {
   // FIXME: dir must be the direct child of rootDir
   //  if (dir.parent_path() != rootDir_) {
   //    throw Error();
   //  }
-  error_code ec;
-  bool done = create_directory(dir, ec);
-  if (!done || ec) {
-    if (must) {
-      throw Error(ErrorCode::SnapshotEnvError,
-        "failed to create directory={} with error={}",
-        dir.c_str(), ec.message());
-    }
-    return ErrorCode::SnapshotEnvError;
-  }
-  return SyncDir(rootDir_); //dir must be the direct child of rootDir
+  create_directory(dir);
+  SyncDir(rootDir_); //dir must be the direct child of rootDir
 }
 
-Status SnapshotEnv::removeDir(const path &dir, bool must)
+void SnapshotEnv::removeDir(const path &dir)
 {
   // FIXME: dir must be the direct child of rootDir
   //  if (dir.parent_path() != rootDir_) {
   //    throw Error();
   //  }
-  error_code ec;
-  remove_all(dir, ec);
-  if (ec) {
-    if (must) {
-      throw Error(ErrorCode::SnapshotEnvError,
-        "failed to remove directory={} with error={}",
-        dir.c_str(), ec.message());
-    }
-    return ErrorCode::SnapshotEnvError;
-  }
-  return SyncDir(rootDir_); //dir must be the direct child of rootDir
+  remove_all(dir);
+  SyncDir(rootDir_); //dir must be the direct child of rootDir
 }
 
 std::mutex SnapshotEnv::finalizeLock_;

@@ -12,32 +12,35 @@
 namespace ycrt
 {
 
+// File system errors are considered critical
+
 // SyncDir calls fsync on the specified fd.
-Status SyncFd(int fd);
+// throw if failed
+void SyncFd(int fd);
 
 // SyncDir calls fsync on the specified directory.
-Status SyncDir(const boost::filesystem::path &dir);
+void SyncDir(const boost::filesystem::path &dir);
 
 // MarkDirAsDeleted marks the specified directory as deleted.
-Status MarkDirAsDeleted(const boost::filesystem::path &dir, string_view content);
+void MarkDirAsDeleted(const boost::filesystem::path &dir, string_view content);
 
 // IsDirMarkedAsDeleted returns a boolean flag indicating whether the specified
 // directory has been marked as deleted.
-StatusWith<bool> IsDirMarkedAsDeleted(const boost::filesystem::path &dir);
+bool IsDirMarkedAsDeleted(const boost::filesystem::path &dir);
 
 // CreateFlagFile creates a flag file in the specific location. The flag file
 // contains the marshaled data of the specified protobuf message.
-Status CreateFlagFile(
+void CreateFlagFile(
   const boost::filesystem::path &filePath,
   string_view content);
 
 // RemoveFlagFile removes the specified flag file.
-Status RemoveFlagFile(const boost::filesystem::path &filePath);
+void RemoveFlagFile(const boost::filesystem::path &filePath);
 
 // GetFlagFileContent gets the content of the flag file found in the specified
 // location. The data of the flag file will be unmarshaled into the specified
 // protobuf message.
-StatusWith<std::string> GetFlagFileContent(const boost::filesystem::path &filePath);
+std::string GetFlagFileContent(const boost::filesystem::path &filePath);
 
 } // namespace ycrt
 
