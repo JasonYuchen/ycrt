@@ -23,6 +23,7 @@ class Snapshotter {
   StatusWith<std::pair<pbSnapshotSPtr, server::SnapshotEnvUPtr>> Save(
     Manager &manager,
     SnapshotMeta &meta);
+  Status Load();
  private:
   server::SnapshotEnvUPtr getSnapshotEnv(const SnapshotMeta &meta);
   server::SnapshotEnvUPtr getSnapshotEnv(uint64_t index);
