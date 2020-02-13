@@ -88,6 +88,7 @@ bool SendChannel::AsyncSendMessage(pbMessageUPtr m)
 
 SendChannel::~SendChannel()
 {
+  stop();
 }
 
 void SendChannel::prepareBuffer()
@@ -259,6 +260,7 @@ void RecvChannel::Start()
 
 RecvChannel::~RecvChannel()
 {
+  stop();
 }
 
 void RecvChannel::readHeader()
@@ -430,6 +432,7 @@ void SnapshotLane::Start(std::vector<pbSnapshotChunkSPtr> &&savedChunks)
 
 SnapshotLane::~SnapshotLane()
 {
+  stop();
   laneCount_--;
 }
 
@@ -521,7 +524,6 @@ void SnapshotLane::connect(tcp::resolver::results_type endpointIter)
       if (!ec) {
         log->debug("SnapshotLane::connect: {} connected",
           endpoint.address().to_string());
-        prepareBuffer();
         sendMessage();
       } else if (ec.value() == error::operation_aborted) {
         log->debug("SnapshotLane::connect: operation aborted");

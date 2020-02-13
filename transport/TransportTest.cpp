@@ -152,7 +152,7 @@ TEST(Transport, AsyncSendSnapshotWith2Chunks)
     sp->set_on_disk_index(7);
     sp->set_cluster_id(1);
     sp->set_filepath((path("test_snap_dir_1") / "snap").string());
-    sp->set_file_size(8 + testPayload.size()); // check, header=8 bytes (uint64_t), payload=4 bytes ("test")
+    sp->set_file_size(testPayload.size()); // check, header=8 bytes (uint64_t), payload=4 bytes ("test")
     sp->set_allocated_membership(new pbMembership());
     sp->set_witness(false);
     transport1->AsyncSendSnapshot(std::move(msg1));
