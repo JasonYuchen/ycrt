@@ -25,7 +25,7 @@ static StatusWith<string> loadSnapshotChunkData(const pbSnapshotChunk &chunk)
     uint64_t offset = chunk.file_chunk_id() * settings::SnapshotChunkSize;
     string data;
     data.resize(chunk.chunk_size());
-    file.ReadAt(data, offset).IsOKOrThrow();
+    file.ReadAt(data, offset);
     return data;
   } catch (Error &e) {
     Log.GetLogger("transport")->error(

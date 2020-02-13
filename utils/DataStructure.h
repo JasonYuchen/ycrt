@@ -28,7 +28,8 @@ class LRUCache {
     remove(key);
     map_[key] = list_.begin();
     if (map_.size() > capacity_) {
-      auto last = list_.back();
+      auto last = list_.end()--;
+      onEvicted_(last->first, last->second);
       map_.erase(last->first);
       list_.pop_back();
     }
@@ -38,7 +39,8 @@ class LRUCache {
     remove(key);
     map_[key] = list_.begin();
     if (map_.size() > capacity_) {
-      auto last = list_.back();
+      auto last = list_.end()--;
+      onEvicted_(last->first, last->second);
       map_.erase(last->first);
       list_.pop_back();
     }
@@ -62,7 +64,6 @@ class LRUCache {
   void remove(const K &key) {
     auto it = map_.find(key);
     if (it != map_.end()) {
-      onEvicted_(key, it->second->second);
       list_.erase(it->second);
       map_.erase(key);
     }

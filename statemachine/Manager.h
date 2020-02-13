@@ -18,6 +18,8 @@ namespace statemachine
 // Manager is used to manage ManagedStateMachine
 class Manager {
  public:
+  Manager(std::atomic_bool &stopped) : stopped_(stopped) { /* TODO */ }
+
   // Open opens on disk state machine.
   StatusWith<uint64_t> Open();
 

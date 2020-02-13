@@ -19,17 +19,19 @@ using statemachine::SnapshotFileSet;
 
 // Value + size + Data, size = len(Data)
 struct Result {
-  uint64_t Value;
+  Result() = default;
+  uint64_t Value = 0;
   any Data;
-  // FIXME:
+  DEFAULT_COPY_MOVE_AND_ASSIGN(Result);
+  // FIXME: return the number of written bytes
   size_t AppendToString(std::string &buf) const {
-    size_t size = any_cast<std::string&>(Data).size();
+    size_t size = any_cast<const std::string&>(Data).size();
     buf.append(reinterpret_cast<const char *>(&Value), sizeof(Value));
     buf.append(reinterpret_cast<const char *>(&size), sizeof(size));
-    buf.append(any_cast<std::string&>(Data));
+    buf.append(any_cast<const std::string&>(Data));
     return sizeof(Value) + sizeof(size) + size;
   }
-  // FIXME:
+  // FIXME: return the number of read bytes
   size_t FromString(string_view buf) {
     size_t size;
     if (buf.size() < sizeof(Value) + sizeof(size)) {
@@ -47,13 +49,13 @@ struct Result {
 using ResultSPtr = std::shared_ptr<Result>;
 
 struct Entry {
-  uint64_t Index;
+  uint64_t Index = 0;
   string_view Cmd;
   struct Result Result;
 };
 
 struct SnapshotFile {
-  uint64_t FileID;
+  uint64_t FileID = 0;
   boost::filesystem::path FilePath;
   std::string Metadata;
 };
