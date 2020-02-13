@@ -48,6 +48,7 @@ notation:
     4. snapshot manager (Snapshotter) &lArr;
     5. snapshot io (SnapshotWriter & SnapshotReader) &lArr;
     6. extra snapshot file collections (SnapshotFileSet) &radic;
+    7. session (Session & SessionManager) &lArr;
 7. tests &times;
 8. transport
     1. transport interface (Transport) &lArr;
@@ -63,6 +64,7 @@ notation:
     2. naive circuit breaker (CircuitBreaker) &radic;
     3. logging (gabime::spdlog, Logger)
     4. error reporting (Error) &radic;
+    5. LRU cache (LRUCache) &radic;
 10. ycrt
     1. configuration (Config) &radic;
     2. raft node (Node) &lArr;
