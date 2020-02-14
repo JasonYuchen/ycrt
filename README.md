@@ -65,6 +65,7 @@ notation:
     3. logging (gabime::spdlog, Logger)
     4. error reporting (Error) &radic;
     5. LRU cache (LRUCache) &radic;
+    6. Read/Write buffer &times;
 10. ycrt
     1. configuration (Config) &radic;
     2. raft node (Node) &lArr;

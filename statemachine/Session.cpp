@@ -34,6 +34,7 @@ void Session::AddResponse(uint64_t seriesID, ResultSPtr result)
   if (item != history_.end()) {
     throw Error(ErrorCode::AlreadyExists, "adding a duplicated response");
   }
+  assert(result);
   history_[seriesID] = std::move(result);
 }
 
@@ -43,6 +44,7 @@ ResultSPtr Session::GetResponse(uint64_t seriesID) const
   if (item == history_.end()) {
     return nullptr;
   }
+  assert(item->second);
   return item->second;
 }
 
@@ -70,13 +72,16 @@ bool Session::HasResponded(uint64_t seriesID) const
   return seriesID <= respondedUpTo_;
 }
 
+// FIXME: save the number of results
 size_t Session::Save(string &buf) const
 {
   size_t written = sizeof(clientID_);
   buf.append(reinterpret_cast<const char *>(&clientID_), sizeof(clientID_));
   written += sizeof(respondedUpTo_);
   buf.append(reinterpret_cast<const char *>(&respondedUpTo_), sizeof(respondedUpTo_));
-  written += sizeof(size_t);
+  size_t count = history_.size();
+  written += sizeof(count);
+  buf.append(reinterpret_cast<const char *>(&count), sizeof(count));
   for (auto &resp : history_) {
     assert(resp.second);
     written += sizeof(resp.first);
@@ -86,32 +91,34 @@ size_t Session::Save(string &buf) const
   return written;
 }
 
-void Session::Load(string_view buf)
+// FIXME: load the number of results
+size_t Session::Load(string_view buf)
 {
-  size_t remaining = buf.size();
-  if (remaining < sizeof(clientID_) + sizeof(respondedUpTo_)) {
+  const char *cur = buf.data();
+  const char *end = buf.data() + buf.size();
+  size_t count = 0;
+  if (end - cur < sizeof(clientID_) + sizeof(respondedUpTo_) + sizeof(count)) {
     throw Error(ErrorCode::InvalidSession, "Session::Load: too short");
   }
-  const char *cur = buf.data();
   ::memcpy(&clientID_, cur, sizeof(clientID_));
   cur += sizeof(clientID_);
   ::memcpy(&respondedUpTo_, cur, sizeof(respondedUpTo_));
   cur += sizeof(respondedUpTo_);
+  ::memcpy(&count, cur, sizeof(count));
+  cur += sizeof(count);
   uint64_t seriesID;
-  while (remaining > 0) {
-    remaining = buf.data() + buf.size() - cur;
-    if (remaining < sizeof(seriesID)) {
+  for (size_t i = 0; i < count; ++i) {
+    if (end - cur < sizeof(seriesID)) {
       break;
     }
     ::memcpy(&seriesID, cur, sizeof(seriesID));
     cur += sizeof(seriesID);
     auto result = make_shared<Result>();
-    cur += result->FromString({cur, remaining});
+    cur += result->FromString({cur, size_t(end - cur)});
     history_[seriesID] = std::move(result);
   }
-  if (remaining) {
-    throw Error(ErrorCode::InvalidSession, "Session::Load: history corrupted");
-  }
+  assert(history_.size() == count);
+  return cur - buf.data();
 }
 
 SessionManager::SessionManager()

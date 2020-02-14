@@ -31,7 +31,7 @@ class Session {
   // serialized bytes will be appended to buf, return number of bytes
   size_t Save(std::string &buf) const;
   // buf should be used to exactly construct Session without any trailing bytes
-  void Load(string_view buf);
+  size_t Load(string_view buf);
  private:
   uint64_t clientID_;
   uint64_t respondedUpTo_;
