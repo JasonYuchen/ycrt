@@ -72,7 +72,6 @@ bool Session::HasResponded(uint64_t seriesID) const
   return seriesID <= respondedUpTo_;
 }
 
-// FIXME: save the number of results
 size_t Session::Save(string &buf) const
 {
   size_t written = sizeof(clientID_);
@@ -91,7 +90,6 @@ size_t Session::Save(string &buf) const
   return written;
 }
 
-// FIXME: load the number of results
 size_t Session::Load(string_view buf)
 {
   const char *cur = buf.data();
@@ -194,16 +192,40 @@ SessionSPtr SessionManager::GetRegisteredClient(uint64_t clientID)
   return session;
 }
 
-uint64_t SessionManager::SaveSessions(std::string &buf)
+size_t SessionManager::SaveSessions(std::string &buf)
 {
-  // TODO
-  return 0;
+  lock_guard<mutex> guard(mutex_);
+  size_t count = sessions_.Size();
+  size_t written = sizeof(count);
+  written += sizeof(count);
+  buf.append(reinterpret_cast<const char *>(&count), sizeof(count));
+  sessions_.OrderedDo(
+    [&written, &buf](const uint64_t &clientID, SessionSPtr &session){
+      written += session->Save(buf);
+    });
+  return written;
 }
 
-uint64_t SessionManager::LoadSessions(ycrt::string_view buf)
+size_t SessionManager::LoadSessions(string_view buf)
 {
-  // TODO
-  return 0;
+  lock_guard<mutex> guard(mutex_);
+  const char *cur = buf.data();
+  const char *end = buf.data() + buf.size();
+  size_t count = 0;
+  if (end - cur  < sizeof(count)) {
+    throw Error(ErrorCode::InvalidSession, log,
+      "SessionManager::LoadSessions: too short");
+  }
+  ::memcpy(&count, cur, sizeof(count));
+  cur += sizeof(count);
+  SessionSPtr session;
+  for (size_t i = 0; i < count; ++i) {
+    session = make_shared<Session>();
+    session->Load({cur, size_t(end - cur)});
+    sessions_.Put(session->ClientID(), std::move(session));
+  }
+  assert(sessions_.Size() == count);
+  return cur - buf.data();
 }
 
 } // namespace statemachine

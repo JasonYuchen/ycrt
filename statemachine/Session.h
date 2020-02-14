@@ -53,8 +53,8 @@ class SessionManager {
   // GetRegisteredClient returns the specified client if exists in the system
   // or nullptr
   SessionSPtr GetRegisteredClient(uint64_t clientID);
-  uint64_t SaveSessions(std::string &buf);
-  uint64_t LoadSessions(string_view buf);
+  size_t SaveSessions(std::string &buf);
+  size_t LoadSessions(string_view buf);
  private:
   slogger log;
   std::mutex mutex_;
