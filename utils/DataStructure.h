@@ -13,6 +13,70 @@
 namespace ycrt
 {
 
+class Buffer {
+ public:
+  Buffer()
+    : cur_(0), buf_() {}
+  const char *Data() const
+  {
+    return buf_.data();
+  }
+  char *Data()
+  {
+    return buf_.data();
+  }
+  uint64_t Written() const
+  {
+    return cur_;
+  }
+  Buffer &Skip(uint64_t len)
+  {
+    ensure(len);
+    cur_ += len;
+    return *this;
+  }
+  Buffer &Append(string_view data)
+  {
+    return Append(data.data(), data.size());
+  }
+  Buffer &Append(const char *data, uint64_t len)
+  {
+    ensure(len);
+    ::memcpy(buf_.data() + cur_, data, len);
+    cur_ += len;
+    return *this;
+  }
+  Buffer &Append(std::string &&data)
+  {
+    return Append(data);
+  }
+  Buffer &Append(const std::string &data)
+  {
+    ensure(data.size());
+    ::memcpy(buf_.data() + cur_, data.data(), data.size());
+    cur_ += data.size();
+    return *this;
+  }
+  template<typename T>
+  Buffer &Append(T data)
+  {
+    static_assert(std::is_arithmetic<T>::value, "append arithmetic");
+    ensure(sizeof(data));
+    ::memcpy(buf_.data() + cur_, &data, sizeof(data));
+    cur_ += sizeof(data);
+    return *this;
+  }
+ private:
+  void ensure(uint64_t len)
+  {
+    if (cur_ + len > buf_.size()) {
+      buf_.resize(2 * buf_.size());
+    }
+  }
+  uint64_t cur_;
+  std::vector<char> buf_;
+};
+
 template<typename K, typename V>
 class LRUCache {
  public:
@@ -59,6 +123,11 @@ class LRUCache {
   }
   bool Has(const K &key) const {
     return map_.find(key) != map_.end();
+  }
+  void OrderedDo(std::function<void(const K &,V &)> &&func) {
+    for (auto &item : list_) {
+      func(item->first, item->second);
+    }
   }
  private:
   void remove(const K &key) {
