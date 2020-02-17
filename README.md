@@ -21,6 +21,11 @@ notation:
 
 &radic; almost finished (need test, review logging, etc)
 
+0. overall
+    1. add docs in every module to explain the workflow &lArr;
+    2. add tests (long term) &times;
+    3. add benchmark (long term) &times;
+    4. refactor transport when C++20 coroutine / C++23 network (long term) ?
 1. logdb
     1. in memory reader (InMemory) &lArr;
     2. rocksdb reader (LogReader) &lArr;
@@ -49,6 +54,7 @@ notation:
     5. snapshot io (SnapshotWriter & SnapshotReader) &lArr;
     6. extra snapshot file collections (SnapshotFileSet) &radic;
     7. session (Session & SessionManager) &lArr;
+    8. snapshot reader support compression &times;
 7. tests &times;
 8. transport
     1. transport interface (Transport) &lArr;
@@ -59,6 +65,7 @@ notation:
     6. snapshot streaming &times;
     7. support timeout mechanism &radic;
     8. support Mutual TLS &times;
+    9. support compression &times;
 9. utils
     1. concurrent queue (cameron314::concurrentqueue)
     2. naive circuit breaker (CircuitBreaker) &radic;
@@ -71,7 +78,6 @@ notation:
     2. raft node (Node) &lArr;
     3. ycrt interface (NodeHost) &times;
     4. core engine (ExecEngine) &times;
-    5. 
 
 ## Build
 
