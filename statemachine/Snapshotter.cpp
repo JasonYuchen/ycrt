@@ -44,6 +44,35 @@ StatusWith<pair<pbSnapshotSPtr, SnapshotEnvUPtr>> Snapshotter::Save(
   return {{std::move(snapshot), std::move(env)}};
 }
 
+Status Snapshotter::Load(
+  Manager &manager,
+  SessionManager &sessions,
+  const pbSnapshot &snapshot)
+{
+  path fp = getSnapshotEnv(snapshot.index())->GetFilePath();
+  vector<SnapshotFile> files;
+  for (auto &file : snapshot.files()) {
+    files.push_back({});
+    files.back().FileID = file.file_id();
+    files.back().FilePath = file.file_path();
+    files.back().Metadata = file.metadata();
+  }
+  // TODO: compression type, size of sessions are encoded in the file
+  SnapshotReader reader(fp, NoCompression);
+  string sessionBuf;
+  sessionBuf.resize(0/*FIXME: session size*/);
+  reader.Read(sessionBuf);
+  uint64_t readBytes = sessions.LoadSessions(sessionBuf);
+  if (readBytes != sessionBuf.size()) {
+    return ErrorCode::InvalidSession;
+  }
+  Status s = manager.RecoverFromSnapshot(reader, files);
+  if (!s.IsOK()) {
+    return s;
+  }
+  return ErrorCode::OK;
+}
+
 SnapshotEnvUPtr Snapshotter::getSnapshotEnv(const SnapshotMeta &meta)
 {
   if (meta.Request.IsExported()) {

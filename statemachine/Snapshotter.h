@@ -5,7 +5,9 @@
 #ifndef YCRT_STATEMACHINE_SNAPSHOTTER_H_
 #define YCRT_STATEMACHINE_SNAPSHOTTER_H_
 
+#include <vector>
 #include "SnapshotIO.h"
+#include "Session.h"
 
 namespace ycrt
 {
@@ -23,7 +25,10 @@ class Snapshotter {
   StatusWith<std::pair<pbSnapshotSPtr, server::SnapshotEnvUPtr>> Save(
     Manager &manager,
     SnapshotMeta &meta);
-  Status Load();
+  Status Load(
+    Manager &manager,
+    SessionManager &sessions,
+    const pbSnapshot &snapshot);
  private:
   server::SnapshotEnvUPtr getSnapshotEnv(const SnapshotMeta &meta);
   server::SnapshotEnvUPtr getSnapshotEnv(uint64_t index);
